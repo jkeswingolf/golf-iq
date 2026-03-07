@@ -1489,7 +1489,7 @@ function GameScreen({ game, profile, logos, onComplete }) {
 /* ═══════════════════════════════════════════════════════
    RESULTS SCREEN
 ═══════════════════════════════════════════════════════ */
-function ResultsScreen({ game, results, times, picked, profile, stats, newTrophies, logoMap, onPlayAgain, onHome }) {
+function ResultsScreen({ game, results, times, picked, profile, stats, newTrophies, onPlayAgain, onHome }) {
   const score = results.filter(Boolean).length;
   const total = times.reduce((a,b)=>a+b,0);
   const [copied, setCopied] = useState(false);
@@ -1556,9 +1556,11 @@ function ResultsScreen({ game, results, times, picked, profile, stats, newTrophi
             const pickedCourse = q.opts[picked[i]];
             return (
               <div key={i} className={`gi-result-row ${correct?"gi-result-correct":"gi-result-wrong"}`}>
-                <div style={{width:32,height:32,borderRadius:"50%",overflow:"hidden",background:"white",flexShrink:0,
-                  border:`1.5px solid ${correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"}`}}>
-                  <CourseLogo course={q.correct} size={32} uploadedData={logoMap ? logoMap[q.correct.id] : null}/>
+                <div style={{width:32,height:32,borderRadius:"50%",flexShrink:0,fontSize:18,
+                  background:correct?"rgba(40,200,90,.15)":"rgba(200,40,40,.15)",
+                  border:"1.5px solid "+(correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"),
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {q.correct.sym}
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -2100,7 +2102,7 @@ function GolfIQ() {
       {screen === "setup"    && <SetupScreen onSave={saveProfile}/>}
       {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} onPlay={startGame} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}
       {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
-      {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} logoMap={logos} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
+      {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
       {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
       {screen === "admin"    && <AdminScreen logos={logos} onSaveLogo={saveLogo} onRemoveLogo={removeLogo} onBack={()=>setScreen("home")}/>}
