@@ -1,0 +1,2108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Golf Course IQ</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { background: #070d1f; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+
+/* ═══════════════════════════════════════════════════════
+   STYLES
+═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   SUPABASE CONFIG
+═══════════════════════════════════════════════════════ */
+const SB_URL = "https://qpniahdcidbetoribret.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbmlhaGRjaWRiZXRvcmlicmV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4NTE4MzMsImV4cCI6MjA4ODQyNzgzM30.B84t2Ih7YwvsMVySydoKeh1WOzChvs2eFTzwj352X8M";
+const SB_HEADERS = {
+  "apikey": SB_KEY,
+  "Authorization": "Bearer " + SB_KEY,
+  "Content-Type": "application/json",
+  "Prefer": "resolution=merge-duplicates"
+};
+
+const db = {
+  loadAll: async function() {
+    try {
+      const r = await fetch(SB_URL + "/rest/v1/logos?select=course_id,data", { headers: SB_HEADERS });
+      if (!r.ok) return {};
+      const rows = await r.json();
+      const result = {};
+      rows.forEach(function(row) { result[row.course_id] = row.data; });
+      return result;
+    } catch(e) { return {}; }
+  },
+  save: async function(id, dataUrl) {
+    try {
+      const r = await fetch(SB_URL + "/rest/v1/logos", {
+        method: "POST",
+        headers: SB_HEADERS,
+        body: JSON.stringify({ course_id: id, data: dataUrl })
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        console.error("Supabase save failed:", r.status, txt);
+      }
+    } catch(e) { console.error("Supabase network error:", e.message); }
+  },
+  remove: async function(id) {
+    try {
+      await fetch(SB_URL + "/rest/v1/logos?course_id=eq." + id, {
+        method: "DELETE",
+        headers: SB_HEADERS
+      });
+    } catch(e) {}
+  }
+};
+
+const css = `
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+.gi-app {
+  font-family: 'Barlow Condensed', sans-serif;
+  min-height: 100vh;
+  background: #070d1f;
+  color: #e8e0cc;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Starfield */
+.gi-stars {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 38% 72%, rgba(255,255,255,.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 64% 31%, rgba(255,255,255,.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 81% 55%, rgba(255,255,255,.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 23% 91%, rgba(255,255,255,.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 91% 8%,  rgba(255,255,255,.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 55% 48%, rgba(255,255,255,.3) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 47% 22%, rgba(200,168,75,.7) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 76% 85%, rgba(200,168,75,.5) 0%, transparent 100%),
+    radial-gradient(200px 200px at 50% 0%, rgba(8,22,72,.9) 0%, transparent 60%),
+    linear-gradient(180deg, #04091a 0%, #070d1f 30%, #050b18 100%);
+}
+
+/* Spotlight behind logo */
+.gi-spotlight {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px; height: 320px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(200,168,75,.12) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+  animation: giSpot 3s ease-in-out infinite;
+}
+@keyframes giSpot {
+  0%,100% { opacity:.7; transform:translate(-50%,-50%) scale(1); }
+  50%      { opacity:1;  transform:translate(-50%,-50%) scale(1.12); }
+}
+
+/* Gold text gradient */
+.gi-gold {
+  background: linear-gradient(to bottom, #f0dfa0 0%, #c8a84b 50%, #f0dfa0 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Playfair */
+.gi-serif { font-family: 'Playfair Display', serif; }
+
+/* ── LOGO RING ── */
+.gi-logo-wrap {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  transition: transform .15s ease;
+}
+.gi-logo-ring {
+  border-radius: 50%;
+  border: 2px solid rgba(200,168,75,.6);
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 0 0 6px rgba(200,168,75,.08), 0 0 40px rgba(200,168,75,.2);
+  animation: giRingPulse 2.6s ease-in-out infinite;
+}
+@keyframes giRingPulse {
+  0%,100% { box-shadow: 0 0 0 6px rgba(200,168,75,.08), 0 0 30px rgba(200,168,75,.18); }
+  50%      { box-shadow: 0 0 0 10px rgba(200,168,75,.14), 0 0 55px rgba(200,168,75,.32); }
+}
+
+/* ── ANSWER BUTTONS ── */
+.gi-opt {
+  width: 100%; display: flex; align-items: center; gap: 0;
+  background: transparent; border: none; padding: 0; cursor: pointer;
+  text-align: left; transition: transform .08s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.gi-opt:disabled { cursor: default; }
+.gi-opt:not(:disabled):active { transform: scale(.97); }
+
+.gi-opt-inner {
+  width: 100%; display: flex; align-items: center;
+  border-radius: 6px; overflow: hidden;
+  border: 1.5px solid;
+  transition: border-color .25s, background .25s, box-shadow .25s;
+  min-height: 58px;
+}
+.gi-opt-letter {
+  flex-shrink: 0; width: 46px; height: 100%; min-height: 58px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Playfair Display', serif; font-weight: 700; font-size: 18px;
+  transition: background .25s, color .25s;
+}
+.gi-opt-sep { width: 1.5px; align-self: stretch; flex-shrink: 0; transition: background .25s; }
+.gi-opt-text {
+  flex: 1; padding: 10px 14px;
+  font-size: 15px; font-weight: 500; letter-spacing: .02em; line-height: 1.3;
+  transition: color .25s;
+}
+.gi-opt-icon { padding-right: 14px; font-size: 18px; flex-shrink: 0; }
+
+/* idle */
+.gi-opt-idle .gi-opt-inner  { border-color: rgba(200,168,75,.3); background: rgba(8,18,55,.6); }
+.gi-opt-idle .gi-opt-letter { background: rgba(200,168,75,.12); color: rgba(200,168,75,.9); }
+.gi-opt-idle .gi-opt-sep    { background: rgba(200,168,75,.25); }
+.gi-opt-idle .gi-opt-text   { color: rgba(230,224,210,.9); }
+.gi-opt-idle:not(:disabled):hover .gi-opt-inner { border-color: rgba(200,168,75,.65); box-shadow: 0 0 16px rgba(200,168,75,.22); }
+.gi-opt-idle:not(:disabled):hover .gi-opt-letter { background: rgba(200,168,75,.22); }
+
+/* selected (pre-reveal) */
+.gi-opt-sel .gi-opt-inner  { border-color: #f0d060; background: rgba(80,55,0,.45); box-shadow: 0 0 22px rgba(240,208,60,.4); }
+.gi-opt-sel .gi-opt-letter { background: rgba(200,168,75,.4); color: #fff5aa; }
+.gi-opt-sel .gi-opt-sep    { background: #f0d060; }
+.gi-opt-sel .gi-opt-text   { color: #fff5aa; }
+@keyframes giSelPulse {
+  0%,100% { box-shadow: 0 0 18px rgba(240,208,60,.35); }
+  50%      { box-shadow: 0 0 32px rgba(240,208,60,.65); }
+}
+.gi-opt-sel .gi-opt-inner { animation: giSelPulse .6s ease infinite; }
+
+/* correct */
+.gi-opt-ok .gi-opt-inner  { border-color: #30e07a; background: rgba(0,60,25,.6); box-shadow: 0 0 28px rgba(40,220,100,.55); }
+.gi-opt-ok .gi-opt-letter { background: rgba(30,160,70,.5); color: #aaffc8; }
+.gi-opt-ok .gi-opt-sep    { background: #30e07a; }
+.gi-opt-ok .gi-opt-text   { color: #ccffde; }
+@keyframes giFlash { 0%,100%{filter:brightness(1)} 40%{filter:brightness(1.8)} }
+.gi-opt-ok .gi-opt-inner { animation: giFlash .55s ease 1; }
+
+/* wrong */
+.gi-opt-bad .gi-opt-inner  { border-color: #e04040; background: rgba(60,5,5,.6); box-shadow: 0 0 22px rgba(220,50,50,.45); }
+.gi-opt-bad .gi-opt-letter { background: rgba(140,20,20,.5); color: #ffaaaa; }
+.gi-opt-bad .gi-opt-sep    { background: #e04040; }
+.gi-opt-bad .gi-opt-text   { color: #ffcccc; }
+
+/* dim */
+.gi-opt-dim .gi-opt-inner  { border-color: rgba(200,168,75,.07); background: rgba(8,18,55,.25); }
+.gi-opt-dim .gi-opt-letter { background: transparent; color: transparent; }
+.gi-opt-dim .gi-opt-sep    { background: transparent; }
+.gi-opt-dim .gi-opt-text   { color: rgba(200,200,200,.2); }
+
+/* ── SCORE DOTS ── */
+.gi-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 1.5px solid rgba(200,168,75,.3);
+  transition: all .4s;
+}
+.gi-dot-correct { background: #30e07a; border-color: #30e07a; box-shadow: 0 0 8px rgba(40,220,100,.7); }
+.gi-dot-wrong   { background: #e04040; border-color: #e04040; box-shadow: 0 0 8px rgba(220,50,50,.7); }
+.gi-dot-active  { background: rgba(200,168,75,.4); border-color: #c8a84b; box-shadow: 0 0 8px rgba(200,168,75,.5); animation: giDotPulse .8s ease infinite; }
+@keyframes giDotPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.3)} }
+
+/* ── BUTTONS ── */
+.gi-btn {
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; cursor: pointer; border: none; border-radius: 4px;
+  transition: all .25s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.gi-btn-gold {
+  background: linear-gradient(to bottom, #d4a93a, #7a5808);
+  color: #0a0600; font-size: 15px; padding: 14px 44px;
+  box-shadow: 0 4px 20px rgba(200,168,75,.4);
+}
+.gi-btn-gold:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(200,168,75,.6); }
+.gi-btn-outline {
+  background: transparent; border: 1.5px solid rgba(200,168,75,.35);
+  color: rgba(200,168,75,.8); font-size: 13px; padding: 10px 24px;
+}
+.gi-btn-outline:hover { border-color: #c8a84b; color: #f0dfa0; background: rgba(200,168,75,.06); }
+.gi-btn-ghost {
+  background: transparent; color: rgba(180,170,145,.5); font-size: 12px; padding: 8px 16px;
+}
+.gi-btn-ghost:hover { color: rgba(200,168,75,.7); }
+
+/* ── CARDS ── */
+.gi-card {
+  background: rgba(8,16,50,.75);
+  border: 1px solid rgba(200,168,75,.2);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+/* ── INPUT ── */
+.gi-input {
+  background: rgba(8,18,55,.8); border: 1.5px solid rgba(200,168,75,.3);
+  border-radius: 5px; padding: 12px 16px; color: #e8e0cc;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 500;
+  width: 100%; outline: none; transition: border-color .2s;
+  letter-spacing: .03em;
+}
+.gi-input::placeholder { color: rgba(200,168,75,.3); }
+.gi-input:focus { border-color: rgba(200,168,75,.7); box-shadow: 0 0 12px rgba(200,168,75,.15); }
+
+/* ── TIMER ── */
+.gi-timer {
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+  font-size: 28px; letter-spacing: .06em; color: #f0dfa0;
+  text-shadow: 0 0 20px rgba(200,168,75,.5);
+  transition: color .3s;
+}
+.gi-timer-fast { color: #ff8844; text-shadow: 0 0 20px rgba(255,100,40,.6); }
+
+/* ── TROPHY ── */
+.gi-trophy-card {
+  border-radius: 8px; padding: 14px;
+  display: flex; align-items: flex-start; gap: 12px;
+  transition: all .3s;
+}
+.gi-trophy-earned {
+  background: linear-gradient(135deg, rgba(200,168,75,.18), rgba(200,168,75,.06));
+  border: 1px solid rgba(200,168,75,.4);
+}
+.gi-trophy-locked {
+  background: rgba(8,18,55,.4);
+  border: 1px solid rgba(255,255,255,.06);
+  opacity: .45;
+  filter: grayscale(.9);
+}
+.gi-trophy-icon {
+  width: 46px; height: 46px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+}
+
+/* ── RESULT ROW ── */
+.gi-result-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-radius: 8px; border: 1px solid;
+}
+.gi-result-correct { background: rgba(0,50,20,.45); border-color: rgba(40,200,90,.3); }
+.gi-result-wrong   { background: rgba(50,5,5,.45);  border-color: rgba(200,40,40,.3); }
+
+/* ── STAT BOX ── */
+.gi-stat {
+  text-align: center; padding: 16px 10px;
+}
+.gi-stat-val {
+  font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 700; line-height: 1;
+  background: linear-gradient(to bottom, #f0dfa0, #c8a84b);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.gi-stat-label {
+  font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(200,168,75,.55); margin-top: 5px;
+}
+
+/* ── SCREEN TRANSITIONS ── */
+@keyframes giFadeIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+.gi-screen { animation: giFadeIn .4s ease; position: relative; z-index: 1; }
+
+/* ── RIPPLE ── */
+@keyframes giRipple { to { transform:scale(4); opacity:0; } }
+.gi-ripple {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: rgba(200,168,75,.35); width:60px; height:60px;
+  margin: -30px 0 0 -30px;
+  animation: giRipple .6s ease-out forwards;
+}
+
+/* ── NEW TROPHY TOAST ── */
+@keyframes giToast { 0%{transform:translateY(-20px);opacity:0} 15%,85%{transform:none;opacity:1} 100%{transform:translateY(-20px);opacity:0} }
+.gi-toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(200,168,75,.95), rgba(120,90,20,.95));
+  color: #0a0600; font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+  letter-spacing: .08em; font-size: 15px; padding: 12px 24px; border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(200,168,75,.5);
+  animation: giToast 3.5s ease forwards; white-space: nowrap; z-index: 9999;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* ── PROGRESS BAR ── */
+.gi-progress-wrap { background: rgba(255,255,255,.08); border-radius: 999px; overflow: hidden; }
+.gi-progress-fill {
+  height: 3px; border-radius: 999px;
+  background: linear-gradient(to right, #c8a84b, #f0dfa0);
+  transition: width .4s ease;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(200,168,75,.25); border-radius: 2px; }
+`;
+
+/* ═══════════════════════════════════════════════════════
+   COURSES DATABASE — All 100 Golf Digest Greatest Courses (2025-2026 edition).
+   Every legendary course included regardless of privacy.
+   Logo chain: Clearbit (domain) → SVG Crest (always works).
+   "init" = the course's real monogram/mark. For private
+   clubs it becomes the crest centerpiece. For Sand Hills
+   the decorative "SH" IS their actual logo.
+═══════════════════════════════════════════════════════ */
+const ALL_COURSES = [
+
+  // ── THE ABSOLUTE SUMMIT ──────────────────────────────
+  { id:"pine-valley",      name:"Pine Valley Golf Club",           loc:"Pine Valley, NJ",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812770_pine%2Bvalley.png",
+    domain:"pinevalleygolfclub.com",   init:"PV",   col:"#1a4020", sym:"🌲" },
+  { id:"augusta",          name:"Augusta National Golf Club",      loc:"Augusta, GA",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812779_angc.png",
+    domain:"masters.com",              init:"AN",   col:"#1a5c2e", sym:"⛳" },
+  { id:"pebble-beach",     name:"Pebble Beach Golf Links",         loc:"Pebble Beach, CA",
+    logoUrl:"https://www.pebblebeach.com/content/themes/verb-base/img/logos/pb-logo-240x240.png",
+    domain:"pebblebeach.com",          init:"PB",   col:"#0d3b8a", sym:"🌊" },
+  { id:"shinnecock",       name:"Shinnecock Hills Golf Club",      loc:"Southampton, NY",
+    domain:"shinnecockgolfclub.org",   init:"SH",   col:"#4a3a2a", sym:"🌾" },
+  { id:"cypress-point",    name:"Cypress Point Club",              loc:"Pebble Beach, CA",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d09cb93c574cc812da4_cypress%2Bpoint.png",
+    domain:"cypresspointclub.com",     init:"CPC",  col:"#0e4a3a", sym:"🌿" },
+
+  // ── GOLDEN AGE PRIVATE LEGENDS ───────────────────────
+  { id:"merion",           name:"Merion Golf Club",                loc:"Ardmore, PA",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d08cb93c574cc812c75_merion.png",
+    domain:"meriongolfclub.com",       init:"MGC",  col:"#6b5010", sym:"🧺" },
+  { id:"winged-foot",      name:"Winged Foot Golf Club",          loc:"Mamaroneck, NY",
+    domain:"wingedfootgc.com",         init:"WF",   col:"#6b2010", sym:"🦅",
+    logoUrl:"https://static.clubessential.com/CEFED/_Axis-Website/Sites/WingedFootGolfClub/images/LogoColor2x.png" },
+  { id:"oakmont",          name:"Oakmont Country Club",            loc:"Oakmont, PA",
+    domain:"oakmontcc.org",            init:"OCC",  col:"#7a3a10", sym:"⚒️",
+    logoUrl:"https://static.clubessential.com/CEFED/_Axis-Website/Sites/OakmontCC2022/images/LogoColor.svg" },
+  { id:"seminole",         name:"Seminole Golf Club",              loc:"Juno Beach, FL",
+    domain:"seminolegolf.org",         init:"SGC",  col:"#8a2010", sym:"🪶",
+    logoUrl:"https://static.clubessential.com/CEFED/_Axis-Website/Sites/SeminoleGC2021/images/Logo_2x.png" },
+  { id:"national-golf",    name:"National Golf Links of America",  loc:"Southampton, NY",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc81279a_ngla.png",
+    domain:"nationalgolflinks.com",    init:"NGL",  col:"#2e3a5c", sym:"⚓" },
+  { id:"crystal-downs",    name:"Crystal Downs Country Club",      loc:"Frankfort, MI",
+    domain:"crystaldowns.com",         init:"CD",   col:"#2e5c7a", sym:"💎" },
+  { id:"chicago-golf",     name:"Chicago Golf Club",               loc:"Wheaton, IL",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc81275e_chicago%2Bgolf.png",
+    domain:"chicagogolfclub.org",      init:"CGC",  col:"#1a1a4a", sym:"🏙️" },
+  { id:"fishers-island",   name:"Fishers Island Club",             loc:"Fishers Island, NY",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d09cb93c574cc812c93_fishers%2Bisland.png",
+    domain:"fishersislandclub.com",    init:"FIC",  col:"#1a3a5c", sym:"🐟" },
+  { id:"maidstone",        name:"Maidstone Club",                  loc:"East Hampton, NY",
+    domain:"maidstoneclubeh.org",      init:"MC",   col:"#3a2e1a", sym:"🐋" },
+  { id:"los-angeles-cc",   name:"Los Angeles Country Club",        loc:"Los Angeles, CA",
+    domain:"lacc.com",                 init:"LACC", col:"#1a4a2e", sym:"🌴" },
+  { id:"the-country-club", name:"The Country Club",                loc:"Brookline, MA",
+    domain:"tcclub.org",               init:"TCC",  col:"#3a1a1a", sym:"🏛️" },
+  { id:"olympic-club",     name:"Olympic Club (Lake Course)",      loc:"San Francisco, CA",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc8127d9_olympic%2Bclub.png",
+    domain:"olyclub.com",              init:"OC",   col:"#1a1a6b", sym:"🏅" },
+  { id:"riviera",          name:"Riviera Country Club",            loc:"Pacific Palisades, CA",
+    logoUrl:"https://static.clubessential.com/CEFED/_Axis-Website/Sites/RivieraCC2021/images/Riviera_logo.png",
+    domain:"rivieracountryclub.com",   init:"RCC",  col:"#1a3a6b", sym:"🌅" },
+  { id:"southern-hills",   name:"Southern Hills Country Club",     loc:"Tulsa, OK",
+    domain:"southernhillscc.com",      init:"SHC",  col:"#5c3a10", sym:"⛰️",
+    logoUrl:"https://clubessential.s3.amazonaws.com/CEFED/_Axis-Website/Sites/SouthernHillsCountryClub2015SDG/images/CrestSHCCBlue.svg" },
+  { id:"oak-hill",         name:"Oak Hill Country Club",           loc:"Pittsford, NY",
+    domain:"oakhillcc.org",            init:"OHC",  col:"#2e4a10", sym:"🌳" },
+  { id:"aronimink",        name:"Aronimink Golf Club",             loc:"Newtown Square, PA",
+    domain:"aroniminkgolfclub.com",    init:"AGC",  col:"#1a3a1a", sym:"🌰" },
+  { id:"medinah-3",        name:"Medinah Country Club (No. 3)",    loc:"Medinah, IL",
+    domain:"medinahcc.org",            init:"MCC",  col:"#2a1a5c", sym:"🌙" },
+  { id:"baltusrol",        name:"Baltusrol Golf Club",             loc:"Springfield, NJ",
+    domain:"baltusrolgolf.com",        init:"BGC",  col:"#2e1a5c", sym:"⚡" },
+  { id:"congressional",    name:"Congressional Country Club",      loc:"Bethesda, MD",
+    domain:"ccclub.org",               init:"CC",   col:"#1a2e7a", sym:"🏛️" },
+  { id:"colonial",         name:"Colonial Country Club",           loc:"Fort Worth, TX",
+    domain:"colonialfw.com",           init:"CCC",  col:"#5c1a1a", sym:"🤠" },
+  { id:"east-lake",        name:"East Lake Golf Club",             loc:"Atlanta, GA",
+    domain:"eastlakegolfclub.com",     init:"EL",   col:"#2e4a1a", sym:"🍃" },
+  { id:"quail-hollow",     name:"Quail Hollow Club",               loc:"Charlotte, NC",
+    domain:"quailhollowclub.com",      init:"QH",   col:"#1a5c1a", sym:"🌿" },
+  { id:"muirfield-v",      name:"Muirfield Village Golf Club",     loc:"Dublin, OH",
+    domain:"muirfieldvillage.com",     init:"MV",   col:"#0d5c3a", sym:"🏆" },
+  { id:"valhalla",         name:"Valhalla Golf Club",              loc:"Louisville, KY",
+    domain:"valhallagolfclub.com",     init:"VGC",  col:"#1a2e5c", sym:"⚔️" },
+  { id:"garden-city",      name:"Garden City Golf Club",           loc:"Garden City, NY",
+    domain:"gcgolfclub.com",           init:"GCG",  col:"#1a3a1a", sym:"🌸" },
+
+  // ── SAND HILLS — real logo IS the SH mark ─────────────
+  { id:"sand-hills",       name:"Sand Hills Golf Club",            loc:"Mullen, NE",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812767_sand%2Bhills.png",
+    domain:"sandhillsgolfclub.com",    init:"SH",   col:"#8a6b2e", sym:"🏜️" },
+
+  // ── RESORT & PUBLIC — strongest brand marks ───────────
+  { id:"pinehurst-2",      name:"Pinehurst No. 2",                 loc:"Pinehurst, NC",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc812794_pinehurs.jpeg",
+    domain:"pinehurst.com",            init:"P",    col:"#7a5c1a", sym:"🧶" },
+  { id:"tpc-sawgrass",     name:"TPC Sawgrass",                    loc:"Ponte Vedra Beach, FL",
+    logoUrl:"https://tpc.com/sawgrass/wp-content/uploads/sites/51/2016/08/sawgrass-website.png",
+    domain:"tpc.com",                  init:"TPC",  col:"#0b3a7a", sym:"🐊" },
+  { id:"tpc-scottsdale",   name:"TPC Scottsdale",                  loc:"Scottsdale, AZ",
+    domain:"tpc.com",                  init:"TPC",  col:"#8a4a12", sym:"🌵" },
+  { id:"bethpage-black",   name:"Bethpage Black",                  loc:"Farmingdale, NY",
+    domain:"bethpagegolf.com",         init:"BB",   col:"#1a1a2e", sym:"🖤" },
+  { id:"torrey-pines",     name:"Torrey Pines (South Course)",     loc:"La Jolla, CA",
+    domain:"torreypinesgolfcourse.com", init:"TP",  col:"#1a6b2e", sym:"🌲" },
+  { id:"bandon-dunes",     name:"Bandon Dunes",                    loc:"Bandon, OR",
+    logoUrl:"https://bandondunesgolf.com/wp-content/uploads/2021/07/BD-Dunes-Logo.png",
+    domain:"bandondunesgolf.com",      init:"BD",   col:"#5c4020", sym:"🐦" },
+  { id:"pacific-dunes",    name:"Pacific Dunes",                   loc:"Bandon, OR",
+    logoUrl:"https://bandondunesgolf.com/wp-content/uploads/2021/07/PD-Logo.png",
+    domain:"bandondunesgolf.com",      init:"PD",   col:"#7a5020", sym:"🦭" },
+  { id:"old-macdonald",    name:"Old Macdonald",                   loc:"Bandon, OR",
+    logoUrl:"https://bandondunesgolf.com/wp-content/uploads/2021/07/OM-Logo.png",
+    domain:"bandondunesgolf.com",      init:"OM",   col:"#6b4a20", sym:"👴" },
+  { id:"whistling",        name:"Whistling Straits",               loc:"Sheboygan, WI",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc81279d_whistling%2Bstraits.png",
+    domain:"destinationkohler.com",    init:"WS",   col:"#1a3a6b", sym:"🎵" },
+  { id:"kiawah",           name:"Kiawah Island Ocean Course",      loc:"Kiawah Island, SC",
+    logoUrl:"https://kiawahresort.com/wp-content/themes/kiawahresort/assets/img/Kiawah-Tree.png",
+    domain:"kiawahresort.com",         init:"KI",   col:"#0e6655", sym:"🌴" },
+  { id:"harbour-town",     name:"Harbour Town Golf Links",         loc:"Hilton Head, SC",
+    domain:"seapines.com",             init:"HT",   col:"#8a1a1a", sym:"🏮" },
+  { id:"erin-hills",       name:"Erin Hills",                      loc:"Erin, WI",
+    domain:"erinhills.com",            init:"EH",   col:"#2e6b9a", sym:"🍀" },
+  { id:"shadow-creek",     name:"Shadow Creek",                    loc:"North Las Vegas, NV",
+    domain:"shadowcreek.com",          init:"SC",   col:"#0e2a1a", sym:"💫" },
+  { id:"chambers-bay",     name:"Chambers Bay",                    loc:"University Place, WA",
+    domain:"chambersbaygolf.com",      init:"CB",   col:"#5c6b3a", sym:"🌊" },
+  { id:"streamsong-black", name:"Streamsong Black",                loc:"Bowling Green, FL",
+    domain:"streamsongresort.com",     init:"SS",   col:"#1a1a1a", sym:"⚫" },
+  { id:"greenbrier",       name:"The Greenbrier (Old White)",      loc:"White Sulphur Springs, WV",
+    domain:"greenbrier.com",           init:"G",    col:"#1a4a2e", sym:"🏰" },
+
+  // ── GOLDEN AGE PRIVATE LEGENDS (continued) ───────────
+  { id:"prairie-dunes",    name:"Prairie Dunes Country Club",      loc:"Hutchinson, KS",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812764_prairie%2Bdunes.png",
+    domain:"prairedunes.com",          init:"PD",   col:"#8a7040", sym:"🌾" },
+  { id:"camargo",          name:"Camargo Club",                    loc:"Indian Hill, OH",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2024/03/Camargo-Club.png",
+    domain:"camargoclub.com",          init:"CC",   col:"#2e5020", sym:"🦌" },
+  { id:"peachtree",        name:"Peachtree Golf Club",             loc:"Atlanta, GA",
+    domain:"peachtreegolfclub.com",    init:"PGC",  col:"#2a6a3a", sym:"🍑" },
+  { id:"kittansett",       name:"Kittansett Club",                 loc:"Marion, MA",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2025/06/Kittansett-Logo.webp",
+    domain:"kittansett.org",           init:"KC",   col:"#1a4a6a", sym:"🐚" },
+  { id:"sf-golf-club",     name:"San Francisco Golf Club",         loc:"San Francisco, CA",
+    domain:"sfgolfclub.org",           init:"SFG",  col:"#3a1a4a", sym:"🌉" },
+  { id:"plainfield",       name:"Plainfield Country Club",         loc:"Edison, NJ",
+    domain:"plainfieldcc.com",         init:"PCC",  col:"#4a3010", sym:"🌿" },
+  { id:"inverness",        name:"Inverness Club",                  loc:"Toledo, OH",
+    domain:"invernessclub.com",        init:"IC",   col:"#503820", sym:"⛪" },
+  { id:"milwaukee-cc",     name:"Milwaukee Country Club",          loc:"Milwaukee, WI",
+    domain:"milwaukeecc.org",          init:"MCC",  col:"#1a2a5a", sym:"🦌" },
+  { id:"piping-rock",      name:"Piping Rock Club",                loc:"Locust Valley, NY",
+    domain:"pipingrockclub.com",       init:"PR",   col:"#2a5a3a", sym:"🪨" },
+  { id:"crooked-stick",    name:"Crooked Stick Golf Club",         loc:"Carmel, IN",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc81274d_crooked%2Bstick.png",
+    domain:"crookedstickgc.com",       init:"CS",   col:"#3a5020", sym:"🌀" },
+
+  // ── RISING GEMS ───────────────────────────────────────
+  { id:"shoreacres",       name:"Shoreacres",                      loc:"Lake Bluff, IL",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2024/06/thumbnail_Shoreacres.png",
+    domain:"shoreacresclub.com",       init:"SA",   col:"#1a5a4a", sym:"🌊" },
+  { id:"old-town",         name:"Old Town Club",                   loc:"Winston-Salem, NC",
+    domain:"oldtownclub.com",          init:"OTC",  col:"#6a4010", sym:"🏘️" },
+  { id:"alotian",          name:"Alotian Club",                    loc:"Roland, AR",
+    domain:"alotianclub.com",          init:"ALC",  col:"#4a6020", sym:"🏹" },
+  { id:"myopia",           name:"Myopia Hunt Club",                loc:"Hamilton, MA",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812750_myopia%2Bhunt.png",
+    domain:"myopiahuntclub.org",       init:"MHC",  col:"#5a1a20", sym:"🦊" },
+  { id:"wade-hampton",     name:"Wade Hampton Golf Club",          loc:"Cashiers, NC",
+    domain:"wadehamptonclub.com",      init:"WH",   col:"#2a6a4a", sym:"🏔️" },
+  { id:"sleepy-hollow",    name:"Sleepy Hollow Country Club",      loc:"Scarborough, NY",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d06cb93c574cc812776_sleepy%2Bhollow.png",
+    domain:"sleepyhollowcc.org",       init:"SHC",  col:"#1a2a6a", sym:"🎃" },
+  { id:"caves-valley",     name:"Caves Valley Golf Club",          loc:"Owings Mills, MD",
+    domain:"cavesvalley.com",          init:"CV",   col:"#2a5a2a", sym:"🦌" },
+  { id:"salem-cc",         name:"Salem Country Club",              loc:"Peabody, MA",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2024/02/Salem-CC.jpeg",
+    domain:"salemcc.org",              init:"SCC",  col:"#6a1a2a", sym:"🕯️" },
+  { id:"somerset-hills",   name:"Somerset Hills Country Club",     loc:"Bernardsville, NJ",
+    domain:"somersethillscc.com",      init:"SHC",  col:"#5a4010", sym:"⛰️" },
+  { id:"baltimore-cc",     name:"Baltimore Country Club",          loc:"Baltimore, MD",
+    domain:"thebaltimorecountryclub.com", init:"BCC", col:"#2a1a5a", sym:"🦞" },
+
+  // ── MODERN PRIVATE MASTERWORKS ────────────────────────
+  { id:"castle-pines",     name:"Castle Pines Golf Club",          loc:"Castle Rock, CO",
+    domain:"castlepinesgolf.com",      init:"CPG",  col:"#2a5a5a", sym:"🏰" },
+  { id:"victoria-national",name:"Victoria National Golf Club",     loc:"Newburgh, IN",
+    domain:"victorianational.com",     init:"VN",   col:"#3a1a6a", sym:"🦅" },
+  { id:"whispering-pines", name:"Whispering Pines Golf Club",      loc:"Trinity, TX",
+    domain:"whisperingpinesgolf.com",  init:"WPG",  col:"#1a4a1a", sym:"🌲" },
+  { id:"kinloch",          name:"Kinloch Golf Club",               loc:"Manakin-Sabot, VA",
+    domain:"kinlochgolf.com",          init:"KGC",  col:"#2a6a5a", sym:"🏰" },
+  { id:"butler-national",  name:"Butler National Golf Club",       loc:"Oak Brook, IL",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d09cb93c574cc812c8e_butler%2Bnational.png",
+    domain:"butlernational.com",       init:"BN",   col:"#1a1a4a", sym:"🦁" },
+  { id:"quarry-lq",        name:"The Quarry at La Quinta",         loc:"La Quinta, CA",
+    domain:"thequarry.com",            init:"Q",    col:"#8a6030", sym:"⛏️" },
+  { id:"canyata",          name:"Canyata",                         loc:"Savanna, IL",
+    domain:"canyatagolf.com",          init:"CYT",  col:"#4a6a5a", sym:"🌾" },
+  { id:"yeamans-hall",     name:"Yeamans Hall Club",               loc:"Hanahan, SC",
+    domain:"yeamanshall.com",          init:"YH",   col:"#3a5010", sym:"🏡" },
+  { id:"dallas-national",  name:"Dallas National Golf Club",       loc:"Dallas, TX",
+    domain:"dallasnational.com",       init:"DN",   col:"#6a2010", sym:"⭐" },
+  { id:"sebonack",         name:"Sebonack Golf Club",              loc:"Southampton, NY",
+    domain:"sebonackgolfclub.com",     init:"SBN",  col:"#1a4a6a", sym:"🌊" },
+
+  // ── NEW WAVE — Post-2000 standouts ───────────────────
+  { id:"the-lido",         name:"The Lido at Sand Valley",         loc:"Nekoosa, WI",
+    domain:"sandvalley.com",           init:"L",    col:"#6a7040", sym:"💧" },
+  { id:"caprock-ranch",    name:"CapRock Ranch",                   loc:"Valentine, NE",
+    domain:"caprockranch.com",         init:"CR",   col:"#7a5030", sym:"🦅" },
+  { id:"ladera",           name:"Ladera Golf Club",                loc:"Thermal, CA",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2024/01/Screen-Shot-2024-01-11-at-8.23.47-AM.png",
+    domain:"laderagolf.com",           init:"LGC",  col:"#9a6030", sym:"🌵" },
+  { id:"sand-valley-gc",   name:"Sand Valley Golf Course",         loc:"Nekoosa, WI",
+    domain:"sandvalley.com",           init:"SV",   col:"#7a6a40", sym:"🏜️" },
+  { id:"bandon-trails",    name:"Bandon Trails",                   loc:"Bandon, OR",
+    logoUrl:"https://bandondunesgolf.com/wp-content/uploads/2021/07/BT-Logo.png",
+    domain:"bandondunesgolf.com",      init:"BT",   col:"#3a5530", sym:"🦋" },
+  { id:"sheep-ranch",      name:"Sheep Ranch",                     loc:"Bandon, OR",
+    logoUrl:"https://bandondunesgolf.com/wp-content/uploads/2021/07/SR-Logo.png",
+    domain:"bandondunesgolf.com",      init:"SR",   col:"#6a7a50", sym:"🐑" },
+  { id:"friars-head",      name:"Friar's Head",                    loc:"Baiting Hollow, NY",
+    logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc8127eb_friars%2Bhead.png",
+    domain:"friarsheadgolf.com",       init:"FH",   col:"#4a3a6a", sym:"⚓" },
+  { id:"monterey-pc",      name:"Monterey Peninsula CC (Dunes)",   loc:"Pebble Beach, CA",
+    logoUrl:"https://www.5clubsgolf.com/wp-content/uploads/2023/11/29dc68ad059409cb6a0d9fa6d59a5c68.png",
+    domain:"mpccgolf.com",             init:"MPC",  col:"#1a5a3a", sym:"🐉" },
+  { id:"gozzer-ranch",     name:"Gozzer Ranch Golf Club",          loc:"Harrison, ID",
+    domain:"gozzerranch.com",          init:"GRG",  col:"#5a4a30", sym:"🦌" },
+  { id:"mayacama",         name:"Mayacama Golf Club",              loc:"Healdsburg, CA",
+    domain:"mayacama.com",             init:"MYC",  col:"#6a3a20", sym:"🍷" },
+  { id:"mossy-oak",        name:"Mossy Oak Golf Club",             loc:"West Point, MS",
+    domain:"mossyoakgolfclub.com",     init:"MOG",  col:"#2a5a1a", sym:"🌳" },
+  { id:"calusa-pines",     name:"Calusa Pines Golf Club",          loc:"Naples, FL",
+    domain:"calusapinesgolf.com",      init:"CPG",  col:"#3a6a2a", sym:"🌴" },
+
+  // ── RESORT & SEMI-PRIVATE GEMS ────────────────────────
+  { id:"streamsong-red",   name:"Streamsong Red",                  loc:"Bowling Green, FL",
+    domain:"streamsongresort.com",     init:"SSR",  col:"#7a1a1a", sym:"🚂" },
+  { id:"streamsong-blue",  name:"Streamsong Blue",                 loc:"Bowling Green, FL",
+    domain:"streamsongresort.com",     init:"SSB",  col:"#1a3a8a", sym:"💧" },
+  { id:"tpc-harding",      name:"TPC Harding Park",               loc:"San Francisco, CA",
+    domain:"tpc.com",                  init:"TPC",  col:"#1a5a6a", sym:"🌉" },
+  { id:"wolf-creek",       name:"Wolf Creek Golf Club",            loc:"Mesquite, NV",
+    domain:"wolfcreekgolf.com",        init:"WCG",  col:"#8a2a1a", sym:"🐺" },
+  { id:"prairie-club",     name:"Prairie Club (Dunes Course)",     loc:"Valentine, NE",
+    domain:"theprairieclub.com",       init:"PRC",  col:"#7a6030", sym:"🌾" },
+  { id:"bel-air-cc",       name:"Bel-Air Country Club",            loc:"Los Angeles, CA",
+    domain:"belaircountryclub.org",    init:"BA",   col:"#5a2a4a", sym:"🌟" },
+  { id:"mcarthur",         name:"McArthur Golf Club",              loc:"Hobe Sound, FL",
+    domain:"mcarthurgolfclub.com",     init:"MAC",  col:"#3a6a3a", sym:"🦅" },
+  { id:"pinehurst-4",      name:"Pinehurst No. 4",                 loc:"Pinehurst, NC",
+    domain:"pinehurst.com",            init:"P4",   col:"#8a6820", sym:"⛳" },
+  { id:"ballyhack",        name:"Ballyhack Golf Club",             loc:"Roanoke, VA",
+    domain:"ballyhackgolf.com",        init:"BHG",  col:"#3a5a4a", sym:"🗡️" },
+  { id:"sedge-valley",     name:"Sedge Valley",                    loc:"Nekoosa, WI",
+    domain:"sandvalley.com",           init:"SEV",  col:"#5a7a4a", sym:"🌾" },
+  { id:"wade-hampton-2",   name:"Camargo Club (Cincinnati)",        loc:"Indian Hill, OH",
+    domain:"camargoclub.com",          init:"CAM",  col:"#2e5a20", sym:"🦌" },
+  { id:"old-sandwich",     name:"Old Sandwich Golf Club",           loc:"Plymouth, MA",
+    domain:"oldsandwichgolfclub.com",  init:"OSG",  col:"#5a4a2a", sym:"🥪" },
+];
+
+
+/* ═══════════════════════════════════════════════════════
+   TROPHIES
+═══════════════════════════════════════════════════════ */
+const TROPHY_DEFS = [
+  { id:"first-tee",    icon:"🏌️", name:"First Tee",        desc:"Complete your first game",                          rarity:"bronze", check: s => s.games >= 1 },
+  { id:"ace",          icon:"⛳", name:"Ace!",               desc:"Score 5 out of 5 in a single game",                rarity:"gold",   check: s => s.perfect >= 1 },
+  { id:"back-to-back", icon:"🔥", name:"Back-to-Back",       desc:"Score 5/5 in two consecutive games",               rarity:"gold",   check: s => s.maxStreak >= 2 },
+  { id:"hat-trick",    icon:"🎩", name:"Hat Trick",          desc:"Score 5/5 in three consecutive games",             rarity:"gold",   check: s => s.maxStreak >= 3 },
+  { id:"quickdraw",    icon:"⚡", name:"Quickdraw",           desc:"Answer any question correctly in under 2 seconds", rarity:"silver", check: s => s.fastestAnswer !== null && s.fastestAnswer < 2000 },
+  { id:"speed-round",  icon:"💨", name:"Speed Round",        desc:"Complete a perfect game in under 20 seconds total", rarity:"gold",   check: s => s.perfectFastGame !== null && s.perfectFastGame < 20000 },
+  { id:"regulars",     icon:"📅", name:"Regular",            desc:"Play 10 games",                                    rarity:"bronze", check: s => s.games >= 10 },
+  { id:"dedicated",    icon:"🏆", name:"Dedicated",          desc:"Play 25 games",                                    rarity:"silver", check: s => s.games >= 25 },
+  { id:"legend",       icon:"💎", name:"Golf Legend",        desc:"Play 100 games",                                   rarity:"gold",   check: s => s.games >= 100 },
+  { id:"sharp-eye",    icon:"🦅", name:"Sharp Eye",          desc:"80% correct over lifetime (min 10 games)",         rarity:"silver", check: s => s.games >= 10 && s.correctRate >= 80 },
+  { id:"perfectionist",icon:"🌟", name:"Perfectionist",      desc:"Score 5/5 five times",                             rarity:"gold",   check: s => s.perfect >= 5 },
+  { id:"comeback-kid", icon:"🔁", name:"Comeback Kid",       desc:"Play again within 30 minutes of a game",           rarity:"bronze", check: s => s.quickReturn === true },
+];
+
+const RARITY_COLORS = { bronze:"#cd7f32", silver:"#c0c0c0", gold:"#f0d060" };
+
+/* ═══════════════════════════════════════════════════════
+   AUDIO ENGINE — authentic golf sounds via Web Audio API
+═══════════════════════════════════════════════════════ */
+let _audioCtx = null;
+function ctx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_audioCtx.state === "suspended") _audioCtx.resume();
+  return _audioCtx;
+}
+
+// Crisp iron strike: sharp transient impact + metallic ring + brief ball-flight hiss
+function playClick() {
+  try {
+    const c = ctx(), t = c.currentTime, sr = c.sampleRate;
+
+    // ── Impact transient (8ms of shaped noise — the "tock" of clubface)
+    const impLen = Math.floor(sr * 0.009);
+    const impBuf = c.createBuffer(1, impLen, sr);
+    const impD = impBuf.getChannelData(0);
+    for (let i = 0; i < impLen; i++) {
+      const env = Math.pow(1 - i / impLen, 1.6);
+      impD[i] = (Math.random() * 2 - 1) * env;
+    }
+    const imp = c.createBufferSource(); imp.buffer = impBuf;
+    const impFilt = c.createBiquadFilter(); impFilt.type = "bandpass";
+    impFilt.frequency.value = 4200; impFilt.Q.value = 0.7;
+    const impG = c.createGain(); impG.gain.setValueAtTime(0.75, t);
+    imp.connect(impFilt); impFilt.connect(impG); impG.connect(c.destination);
+    imp.start(t);
+
+    // ── Metallic ring — iron face resonance (high chirp sweeping down)
+    const ring = c.createOscillator(); ring.type = "sine";
+    const ringG = c.createGain();
+    ring.frequency.setValueAtTime(3200, t);
+    ring.frequency.exponentialRampToValueAtTime(1600, t + 0.06);
+    ring.frequency.exponentialRampToValueAtTime(800,  t + 0.16);
+    ringG.gain.setValueAtTime(0.14, t);
+    ringG.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    ring.connect(ringG); ringG.connect(c.destination);
+    ring.start(t); ring.stop(t + 0.2);
+
+    // ── Low body thud (the feel of the strike)
+    const body = c.createOscillator(); body.type = "triangle";
+    const bodyG = c.createGain();
+    body.frequency.setValueAtTime(380, t);
+    body.frequency.exponentialRampToValueAtTime(180, t + 0.09);
+    bodyG.gain.setValueAtTime(0.10, t);
+    bodyG.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+    body.connect(bodyG); bodyG.connect(c.destination);
+    body.start(t); body.stop(t + 0.13);
+
+    // ── Ball-flight hiss (very faint, fades in after impact)
+    const hissLen = Math.floor(sr * 0.18);
+    const hissBuf = c.createBuffer(1, hissLen, sr);
+    const hissD = hissBuf.getChannelData(0);
+    for (let i = 0; i < hissLen; i++) {
+      const env = (i / hissLen) * Math.pow(1 - i / hissLen, 2.0);
+      hissD[i] = (Math.random() * 2 - 1) * env;
+    }
+    const hiss = c.createBufferSource(); hiss.buffer = hissBuf;
+    const hissFilt = c.createBiquadFilter(); hissFilt.type = "highpass"; hissFilt.frequency.value = 5000;
+    const hissG = c.createGain(); hissG.gain.setValueAtTime(0.07, t + 0.01);
+    hiss.connect(hissFilt); hissFilt.connect(hissG); hissG.connect(c.destination);
+    hiss.start(t + 0.01);
+  } catch(_) {}
+}
+
+// Ball dropping into cup: hollow "tok" on edge, then the iconic rattle-settle
+function playCupIn() {
+  try {
+    const c = ctx(), t = c.currentTime, sr = c.sampleRate;
+
+    // ── First contact — ball hits cup edge (hollow, wooden-plastic quality)
+    const tok1 = c.createOscillator(); tok1.type = "sine";
+    const tok1G = c.createGain();
+    tok1.frequency.setValueAtTime(560, t);
+    tok1.frequency.exponentialRampToValueAtTime(290, t + 0.09);
+    tok1G.gain.setValueAtTime(0.28, t);
+    tok1G.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    tok1.connect(tok1G); tok1G.connect(c.destination);
+    tok1.start(t); tok1.stop(t + 0.16);
+
+    // Second harmonic for richness
+    const tok1b = c.createOscillator(); tok1b.type = "sine";
+    const tok1bG = c.createGain();
+    tok1b.frequency.setValueAtTime(1120, t);
+    tok1b.frequency.exponentialRampToValueAtTime(580, t + 0.07);
+    tok1bG.gain.setValueAtTime(0.09, t);
+    tok1bG.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    tok1b.connect(tok1bG); tok1bG.connect(c.destination);
+    tok1b.start(t); tok1b.stop(t + 0.1);
+
+    // ── Bottom of cup impact (slightly lower, 85ms later)
+    const tok2 = c.createOscillator(); tok2.type = "sine";
+    const tok2G = c.createGain();
+    tok2.frequency.setValueAtTime(420, t + 0.085);
+    tok2.frequency.exponentialRampToValueAtTime(200, t + 0.085 + 0.1);
+    tok2G.gain.setValueAtTime(0.22, t + 0.085);
+    tok2G.gain.exponentialRampToValueAtTime(0.001, t + 0.085 + 0.16);
+    tok2.connect(tok2G); tok2G.connect(c.destination);
+    tok2.start(t + 0.085); tok2.stop(t + 0.28);
+
+    // ── Rattle/settle — the ball rolling around the cup bottom
+    const rattleLen = Math.floor(sr * 0.22);
+    const rattleBuf = c.createBuffer(1, rattleLen, sr);
+    const rattleD = rattleBuf.getChannelData(0);
+    for (let i = 0; i < rattleLen; i++) {
+      // Bursting, irregular — simulates ball bouncing inside
+      const burst = Math.sin(i * 0.004) * Math.sin(i * 0.017) * Math.sin(i * 0.031);
+      const env = Math.pow(1 - i / rattleLen, 1.2);
+      rattleD[i] = (Math.random() * 2 - 1) * Math.abs(burst) * env * 0.9;
+    }
+    const rattle = c.createBufferSource(); rattle.buffer = rattleBuf;
+    const rattleFilt = c.createBiquadFilter(); rattleFilt.type = "bandpass";
+    rattleFilt.frequency.value = 1400; rattleFilt.Q.value = 1.8;
+    const rattleG = c.createGain();
+    rattleG.gain.setValueAtTime(0.22, t + 0.16);
+    rattleG.gain.exponentialRampToValueAtTime(0.001, t + 0.44);
+    rattle.connect(rattleFilt); rattleFilt.connect(rattleG); rattleG.connect(c.destination);
+    rattle.start(t + 0.16);
+  } catch(_) {}
+}
+
+// Sand explosion: burst of shaped noise = ball hitting a bunker
+function playWrong() {
+  try {
+    const c = ctx(), t = c.currentTime, sr = c.sampleRate;
+
+    // ── Sandy explosion — shaped noise with fast attack, slow decay
+    const dur = 0.38;
+    const sandLen = Math.floor(sr * dur);
+    const sandBuf = c.createBuffer(1, sandLen, sr);
+    const sandD = sandBuf.getChannelData(0);
+    for (let i = 0; i < sandLen; i++) {
+      const attackEnd = Math.floor(sr * 0.018);
+      const env = i < attackEnd
+        ? i / attackEnd
+        : Math.pow(1 - (i - attackEnd) / (sandLen - attackEnd), 0.75);
+      sandD[i] = (Math.random() * 2 - 1) * env;
+    }
+    const sand = c.createBufferSource(); sand.buffer = sandBuf;
+    // Band-limited to sound granular, not just white noise
+    const sandFilt = c.createBiquadFilter(); sandFilt.type = "bandpass";
+    sandFilt.frequency.value = 900; sandFilt.Q.value = 0.55;
+    const sandG = c.createGain(); sandG.gain.setValueAtTime(0.32, t);
+    sand.connect(sandFilt); sandFilt.connect(sandG); sandG.connect(c.destination);
+    sand.start(t);
+
+    // Low-frequency thud of ball hitting the sand
+    const thud = c.createOscillator(); thud.type = "sine";
+    const thudG = c.createGain();
+    thud.frequency.setValueAtTime(160, t);
+    thud.frequency.exponentialRampToValueAtTime(55, t + 0.13);
+    thudG.gain.setValueAtTime(0.22, t);
+    thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+    thud.connect(thudG); thudG.connect(c.destination);
+    thud.start(t); thud.stop(t + 0.2);
+
+    // Brief high splatter (the sand grains hitting the surface)
+    const splatLen = Math.floor(sr * 0.08);
+    const splatBuf = c.createBuffer(1, splatLen, sr);
+    const splatD = splatBuf.getChannelData(0);
+    for (let i = 0; i < splatLen; i++) splatD[i] = (Math.random() * 2 - 1) * (1 - i/splatLen);
+    const splat = c.createBufferSource(); splat.buffer = splatBuf;
+    const splatFilt = c.createBiquadFilter(); splatFilt.type = "highpass"; splatFilt.frequency.value = 3500;
+    const splatG = c.createGain(); splatG.gain.setValueAtTime(0.10, t + 0.02);
+    splat.connect(splatFilt); splatFilt.connect(splatG); splatG.connect(c.destination);
+    splat.start(t + 0.02);
+  } catch(_) {}
+}
+
+/* ═══════════════════════════════════════════════════════
+   STORAGE HELPERS
+═══════════════════════════════════════════════════════ */
+const S = {
+  async get(k) {
+    try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; }
+  },
+  async set(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); } catch(_) {}
+  },
+};
+
+/* ═══════════════════════════════════════════════════════
+   GAME FACTORY
+═══════════════════════════════════════════════════════ */
+function makeGame(pool = ALL_COURSES) {
+  const shuffled = [...pool].sort(() => Math.random() - .5);
+  const picks = shuffled.slice(0, 5);
+  return picks.map(correct => {
+    const others = ALL_COURSES.filter(c => c.id !== correct.id).sort(() => Math.random() - .5).slice(0, 3);
+    const opts = [...others, correct].sort(() => Math.random() - .5);
+    return { correct, opts, ansIdx: opts.findIndex(o => o.id === correct.id) };
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+const fmt = ms => ms < 1000 ? `${ms}ms` : `${(ms/1000).toFixed(1)}s`;
+const fmtFull = ms => (ms/1000).toFixed(2) + "s";
+
+function calcStats(history) {
+  if (!history.length) return { games:0, correct:0, total:0, correctRate:0, perfect:0, maxStreak:0, bestTime:null, fastestAnswer:null, perfectFastGame:null, quickReturn:false };
+  let correct=0, total=0, perfect=0, streak=0, maxStreak=0, bestTime=null, fastestAnswer=null, perfectFastGame=null, quickReturn=false;
+  history.forEach((g, i) => {
+    const score = g.results.filter(Boolean).length;
+    correct += score; total += 5;
+    if (score === 5) { perfect++; streak++; maxStreak = Math.max(maxStreak, streak); if (!bestTime || g.totalMs < bestTime) bestTime = g.totalMs; if (g.totalMs < 20000) perfectFastGame = g.totalMs; }
+    else streak = 0;
+    g.times.forEach(t => { if (g.results[g.times.indexOf(t)]) { if (!fastestAnswer || t < fastestAnswer) fastestAnswer = t; } });
+    if (i > 0) { const prev = history[i-1]; if (g.ts - prev.ts < 30*60*1000) quickReturn = true; }
+  });
+  return { games:history.length, correct, total, correctRate: total ? Math.round(correct/total*100) : 0, perfect, maxStreak, bestTime, fastestAnswer, perfectFastGame, quickReturn };
+}
+
+function checkTrophies(stats, prevTrophySet) {
+  const earned = new Set(prevTrophySet);
+  const newOnes = [];
+  TROPHY_DEFS.forEach(t => {
+    if (!earned.has(t.id) && t.check(stats)) { earned.add(t.id); newOnes.push(t); }
+  });
+  return { earned, newOnes };
+}
+
+function generateShare(game, results, times, profile, stats) {
+  const score = results.filter(Boolean).length;
+  const total = times.reduce((a,b)=>a+b,0);
+  const emojis = results.map(r => r ? "✅" : "❌").join("");
+  const lines = [
+    `⛳ Golf Course IQ`,
+    profile.username ? `🏌️ @${profile.username}${profile.tagline ? ` · "${profile.tagline}"` : ""}` : "",
+    ``,
+    `${emojis}`,
+    `📊 ${score}/5 correct · ⏱️ ${fmtFull(total)} total`,
+    ``,
+    ...game.map((q,i) => {
+      const picked = q.opts.find((_, oi) => oi === (results[i] ? q.ansIdx : game[i]._picked));
+      return `${results[i]?"✅":"❌"} Q${i+1}: ${q.correct.name} (${fmtFull(times[i])})`;
+    }),
+    ``,
+    `🏅 All-time: ${stats.correctRate}% · ${stats.games} game${stats.games!==1?"s":""}`,
+    ``,
+    `Play Golf Course IQ → golf-iq.app`,
+  ].filter(l => l !== undefined);
+  return lines.join("\n");
+}
+
+/* ═══════════════════════════════════════════════════════
+   CLUB CREST — SVG heraldic badge rendered when no logo loads.
+   Looks like an actual embroidered club crest, not letters.
+═══════════════════════════════════════════════════════ */
+function ClubCrest({ course, size }) {
+  const r = size / 2;
+  const numDots = 16;
+  // Outer decorative ring dots
+  const dots = Array.from({ length: numDots }, (_, i) => {
+    const angle = (i / numDots) * Math.PI * 2 - Math.PI / 2;
+    return {
+      x: r + (r - 7) * Math.cos(angle),
+      y: r + (r - 7) * Math.sin(angle),
+    };
+  });
+  // Crossed clubs path (simplified SVG paths centered on r,r)
+  const sc = size / 100; // scale factor
+  const cx = r, cy = r;
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display:"block" }}>
+      <defs>
+        <radialGradient id={`bg-${course.id}`} cx="40%" cy="35%">
+          <stop offset="0%" stopColor={course.col} stopOpacity="1" />
+          <stop offset="100%" stopColor={`${course.col}88`} stopOpacity="1" />
+        </radialGradient>
+        <radialGradient id={`sheen-${course.id}`} cx="38%" cy="28%">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.18)" />
+          <stop offset="60%" stopColor="rgba(255,255,255,0)" />
+        </radialGradient>
+      </defs>
+
+      {/* Background circle */}
+      <circle cx={r} cy={r} r={r - 1} fill={`url(#bg-${course.id})`} />
+
+      {/* Sheen highlight */}
+      <circle cx={r} cy={r} r={r - 1} fill={`url(#sheen-${course.id})`} />
+
+      {/* Outer gold ring */}
+      <circle cx={r} cy={r} r={r - 2} fill="none" stroke="rgba(200,168,75,0.75)" strokeWidth="2" />
+
+      {/* Inner decorative ring */}
+      <circle cx={r} cy={r} r={r * 0.78} fill="none" stroke="rgba(200,168,75,0.3)" strokeWidth="1" strokeDasharray="3 2.5" />
+
+      {/* Decorative dots on outer ring */}
+      {dots.map((d, i) => (
+        <circle key={i} cx={d.x} cy={d.y} r={i % 4 === 0 ? 2 : 1.2}
+          fill={i % 4 === 0 ? "rgba(200,168,75,0.85)" : "rgba(200,168,75,0.4)"} />
+      ))}
+
+      {/* Course symbol emoji — prominent, centered */}
+      {course.sym
+        ? <>
+            <text
+              x={r} y={cy + r * 0.18}
+              textAnchor="middle" dominantBaseline="middle"
+              fontSize={size * 0.38}
+              style={{ userSelect:"none" }}
+            >
+              {course.sym}
+            </text>
+            {/* Club initials below emoji */}
+            <text
+              x={r} y={cy + r * 0.72}
+              textAnchor="middle"
+              fontSize={course.init.length > 3 ? size * 0.105 : course.init.length > 2 ? size * 0.12 : size * 0.135}
+              fontFamily="'Playfair Display', Georgia, serif"
+              fontWeight="700"
+              fill="rgba(255,220,120,0.9)"
+              letterSpacing="1.5"
+            >
+              {course.init}
+            </text>
+          </>
+        : <>
+            {/* Fallback: golf flag + initials */}
+            <line x1={cx - 2} y1={cy - r * 0.36} x2={cx - 2} y2={cy + r * 0.32}
+              stroke="rgba(220,195,110,0.9)" strokeWidth={1.6 * sc * 2} strokeLinecap="round" />
+            <polygon
+              points={`${cx - 1},${cy - r * 0.36} ${cx + r * 0.26},${cy - r * 0.22} ${cx - 1},${cy - r * 0.06}`}
+              fill="rgba(200,168,75,0.9)" />
+            <ellipse cx={cx - 2} cy={cy + r * 0.34} rx={r * 0.16} ry={r * 0.045}
+              fill="rgba(0,0,0,0.25)" />
+            <text
+              x={r} y={cy + r * 0.61}
+              textAnchor="middle"
+              fontSize={course.init.length > 3 ? size * 0.115 : course.init.length > 2 ? size * 0.135 : size * 0.155}
+              fontFamily="'Playfair Display', Georgia, serif"
+              fontWeight="700"
+              fill="rgba(255,220,120,0.95)"
+              letterSpacing="1.5"
+            >
+              {course.init}
+            </text>
+          </>
+      }
+
+      {/* Thin gold baseline under initials */}
+      <line
+        x1={r - r * 0.32} y1={cy + r * 0.78}
+        x2={r + r * 0.32} y2={cy + r * 0.78}
+        stroke="rgba(200,168,75,0.4)" strokeWidth="0.8"
+      />
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   COURSE LOGO — logoUrl → SVG Crest fallback
+   + "Suggest Logo" button so users can paste better URLs.
+═══════════════════════════════════════════════════════ */
+function CourseLogo({ course, size = 120, allowSuggest = false, uploadedData = null }) {
+  const [savedData, setSavedData]   = useState(null);  // base64 data URL from storage
+  const [failed, setFailed]         = useState(false);
+  const [open, setOpen]             = useState(false);
+  const [dragging, setDragging]     = useState(false);
+  const [preview, setPreview]       = useState(null);  // base64 preview before save
+  const [saving, setSaving]         = useState(false);
+  const [saved, setSaved]           = useState(false);
+  const fileInputRef = useRef(null);
+  const imgRef = useRef(null);
+
+  // What actually shows: uploaded base64 > built-in URL
+  const activeUrl = savedData || course.logoUrl;
+
+  // Load saved base64 logo from storage on mount
+  useEffect(() => {
+    if (uploadedData) { setSavedData(uploadedData); setFailed(false); }
+  }, [uploadedData]);
+
+  const onErr = () => { if (!savedData) setFailed(true); };
+  const onLoad = () => {
+    const img = imgRef.current;
+    if (img && img.naturalWidth > 0 && img.naturalWidth < 8) onErr();
+  };
+
+  // Convert file → base64 and show preview
+  const processFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => setPreview(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const saveLogo = async () => {
+    if (!preview) return;
+    setSaving(true);
+    try {
+      // Resize to max 120x120 before saving
+      const resized = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 120;
+          const scale = Math.min(MAX/img.width, MAX/img.height, 1);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/png", 0.85));
+        };
+        img.onerror = () => resolve(preview);
+        img.src = preview;
+      });
+      db.save(course.id, resized);
+      // saved via db.save above
+      if (!check || !check.value) throw new Error("verify failed");
+      setSavedData(resized);
+      setFailed(false);
+      setPreview(null);
+      setOpen(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch(e) {
+      alert("Save failed — image may be too large. Try a smaller file.");
+    }
+    setSaving(false);
+  };
+
+  const removeLogo = async () => {
+    db.remove(course.id);
+    setSavedData(null);
+    setPreview(null);
+    setFailed(!course.logoUrl);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position:"relative", display:"inline-block" }}>
+      {/* ── Main logo display ── */}
+      <div style={{
+        width: size, height: size, borderRadius: "50%", overflow: "hidden",
+        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: (failed || !activeUrl) ? "transparent" : "white",
+        transition: "box-shadow .3s",
+        ...(saved ? { boxShadow:"0 0 0 3px #4caf7d, 0 0 20px rgba(76,175,80,.5)" } : {}),
+      }}>
+        {activeUrl && !failed
+          ? <img ref={imgRef} src={activeUrl} alt={course.name}
+              style={{ width:"100%", height:"100%", objectFit:"contain", padding:6, display:"block" }}
+              onError={onErr} onLoad={onLoad} />
+          : <ClubCrest course={course} size={size} />
+        }
+      </div>
+
+      {/* ── Upload button ── */}
+      {allowSuggest && !open && (
+        <button onClick={() => { setOpen(true); setPreview(null); }}
+          title="Upload logo image"
+          style={{
+            position:"absolute", bottom:-6, right:-6,
+            background: savedData ? "rgba(76,175,80,0.2)" : "rgba(200,168,75,0.15)",
+            border: `1px solid ${savedData ? "rgba(76,175,80,0.5)" : "rgba(200,168,75,0.4)"}`,
+            borderRadius:"50%", width:26, height:26, cursor:"pointer",
+            fontSize:13, display:"flex", alignItems:"center", justifyContent:"center",
+            color: savedData ? "rgba(76,175,80,0.9)" : "rgba(200,168,75,0.8)", lineHeight:1,
+          }}>{savedData ? "✓" : "📷"}</button>
+      )}
+
+      {/* ── Upload popover ── */}
+      {open && (
+        <div style={{
+          position:"absolute", top:"110%", left:"50%", transform:"translateX(-50%)",
+          background:"#0a1420", border:"1px solid rgba(200,168,75,0.45)",
+          borderRadius:12, padding:"14px 16px", zIndex:999, width:260,
+          boxShadow:"0 12px 32px rgba(0,0,0,0.7)",
+        }}>
+          <div style={{fontSize:11,color:"rgba(200,168,75,0.8)",marginBottom:10,
+            letterSpacing:".08em",fontWeight:600,textAlign:"center"}}>
+            📷 ADD LOGO · {course.name.toUpperCase().split(" ").slice(0,3).join(" ")}
+          </div>
+
+          {/* Drop zone */}
+          <div
+            onDrop={handleDrop}
+            onDragOver={e=>{e.preventDefault();setDragging(true);}}
+            onDragLeave={()=>setDragging(false)}
+            onClick={()=>fileInputRef.current?.click()}
+            style={{
+              border: `2px dashed ${dragging ? "rgba(200,168,75,0.8)" : "rgba(200,168,75,0.3)"}`,
+              borderRadius:8, padding:"14px 10px", textAlign:"center",
+              cursor:"pointer", marginBottom:10, transition:"all .2s",
+              background: dragging ? "rgba(200,168,75,0.08)" : "rgba(255,255,255,0.03)",
+            }}>
+            {preview
+              ? <img src={preview} alt="preview"
+                  style={{width:72,height:72,objectFit:"contain",borderRadius:8,
+                    background:"white",padding:4,display:"block",margin:"0 auto 6px"}} />
+              : <div style={{fontSize:28,marginBottom:4}}>🖼️</div>
+            }
+            <div style={{fontSize:11,color:"rgba(200,168,75,0.6)",lineHeight:1.4}}>
+              {preview
+                ? <span style={{color:"rgba(76,175,80,0.9)"}}>✓ Ready to save</span>
+                : <><strong style={{color:"rgba(200,168,75,0.85)"}}>Drop image here</strong><br/>or click to browse</>
+              }
+            </div>
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*"
+            style={{display:"none"}} onChange={handleFileChange} />
+
+          {/* Action buttons */}
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            <button onClick={saveLogo} disabled={!preview || saving}
+              style={{
+                flex:1, background: preview ? "rgba(76,175,80,0.2)" : "rgba(255,255,255,0.05)",
+                border:`1px solid ${preview ? "rgba(76,175,80,0.5)" : "rgba(255,255,255,0.1)"}`,
+                borderRadius:6, color: preview ? "rgba(76,175,80,0.95)" : "rgba(255,255,255,0.3)",
+                padding:"7px 0", cursor: preview ? "pointer" : "not-allowed",
+                fontSize:12, fontWeight:700, letterSpacing:".05em",
+              }}>
+              {saving ? "Saving…" : "✓ Save Logo"}
+            </button>
+            <button onClick={()=>{setOpen(false);setPreview(null);}}
+              style={{
+                background:"transparent", border:"1px solid rgba(255,255,255,0.15)",
+                borderRadius:6, color:"rgba(255,255,255,0.4)", padding:"7px 10px",
+                cursor:"pointer", fontSize:12,
+              }}>✕</button>
+          </div>
+
+          {savedData && (
+            <button onClick={removeLogo}
+              style={{
+                width:"100%", background:"rgba(255,60,60,0.08)",
+                border:"1px solid rgba(255,60,60,0.25)", borderRadius:6,
+                color:"rgba(255,100,100,0.7)", padding:"5px 0",
+                cursor:"pointer", fontSize:11,
+              }}>Remove uploaded logo</button>
+          )}
+
+          <div style={{fontSize:9,color:"rgba(200,168,75,0.3)",marginTop:8,
+            textAlign:"center",lineHeight:1.4}}>
+            Saved as embedded image · works offline · permanent
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   ANSWER BUTTON
+═══════════════════════════════════════════════════════ */
+function OptBtn({ letter, option, state, onClick, disabled }) {
+  const cls = { idle:"gi-opt-idle", sel:"gi-opt-sel", ok:"gi-opt-ok", bad:"gi-opt-bad", dim:"gi-opt-dim" };
+  const icons = { ok:"✓", bad:"✗" };
+  const rippleRef = useRef(null);
+
+  const handleClick = (e) => {
+    if (disabled || state !== "idle") return;
+    // Ripple
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    const rip = document.createElement("div");
+    rip.className = "gi-ripple";
+    rip.style.left = `${e.clientX - rect.left}px`;
+    rip.style.top  = `${e.clientY - rect.top}px`;
+    btn.appendChild(rip);
+    setTimeout(() => rip.remove(), 650);
+    onClick();
+  };
+
+  return (
+    <button className={`gi-opt ${cls[state]||"gi-opt-idle"}`}
+      onClick={handleClick} disabled={disabled || state==="dim"} style={{position:"relative",overflow:"hidden"}}>
+      <div className="gi-opt-inner">
+        <span className="gi-opt-letter">{letter}</span>
+        <div className="gi-opt-sep" />
+        <span className="gi-opt-text">
+          <span style={{fontWeight:600}}>{option.name}</span>
+          <br/>
+          <span style={{fontSize:12,opacity:.7,fontWeight:400}}>📍 {option.loc}</span>
+        </span>
+        {(state==="ok"||state==="bad") && <span className="gi-opt-icon">{icons[state]}</span>}
+      </div>
+    </button>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   SETUP SCREEN
+═══════════════════════════════════════════════════════ */
+function SetupScreen({ onSave }) {
+  const [username, setUsername] = useState("");
+  const [tagline, setTagline] = useState("");
+
+  return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/><div className="gi-spotlight"/>
+      <div className="gi-screen" style={{width:"100%",maxWidth:400,padding:"32px 24px"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:52,marginBottom:12}}>⛳</div>
+          <div className="gi-serif gi-gold" style={{fontSize:32,fontWeight:900,lineHeight:1.1}}>Golf Course IQ</div>
+          <div style={{color:"rgba(200,180,140,.6)",fontSize:14,marginTop:8,letterSpacing:".06em"}}>CREATE YOUR PLAYER PROFILE</div>
+        </div>
+        <div className="gi-card" style={{padding:"28px 24px",display:"flex",flexDirection:"column",gap:18}}>
+          <div>
+            <label style={{fontSize:11,letterSpacing:".12em",color:"rgba(200,168,75,.6)",fontWeight:700,display:"block",marginBottom:7}}>
+              CADDIE NAME / USERNAME
+            </label>
+            <input className="gi-input" placeholder="e.g. TigerFan88" maxLength={24}
+              value={username} onChange={e=>setUsername(e.target.value)} />
+          </div>
+          <div>
+            <label style={{fontSize:11,letterSpacing:".12em",color:"rgba(200,168,75,.6)",fontWeight:700,display:"block",marginBottom:7}}>
+              YOUR GOLF TAGLINE <span style={{opacity:.5,fontWeight:400}}>(optional)</span>
+            </label>
+            <input className="gi-input" placeholder="e.g. Scratch golfer, lifetime duffer" maxLength={48}
+              value={tagline} onChange={e=>setTagline(e.target.value)} />
+          </div>
+          <button className="gi-btn gi-btn-gold" style={{marginTop:6,width:"100%"}}
+            onClick={() => username.trim() && onSave({ username:username.trim(), tagline:tagline.trim() })}>
+            TEE IT UP →
+          </button>
+        </div>
+        <div style={{textAlign:"center",marginTop:14,color:"rgba(180,165,130,.3)",fontSize:11,letterSpacing:".08em"}}>
+          YOUR DATA STAYS ON YOUR DEVICE
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   HOME SCREEN
+═══════════════════════════════════════════════════════ */
+function HomeScreen({ profile, stats, trophyCount, onPlay, onStats, onTrophies, onEditProfile, onAdmin }) {
+  return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/><div className="gi-spotlight"/>
+      <div className="gi-screen" style={{width:"100%",maxWidth:480,padding:"32px 20px",textAlign:"center"}}>
+        <div style={{fontSize:58,marginBottom:8}}>⛳</div>
+        <div className="gi-serif gi-gold" style={{fontSize:46,fontWeight:900,lineHeight:1.05,letterSpacing:".01em"}}>
+          Golf Course IQ
+        </div>
+        <div style={{color:"rgba(200,180,140,.55)",fontSize:14,letterSpacing:".1em",marginTop:6,marginBottom:24}}>
+          ALL 100 GOLF DIGEST GREATEST COURSES — CAN YOU IDENTIFY THEM?
+        </div>
+
+        {/* Profile card */}
+        <div className="gi-card" style={{padding:"14px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:14,textAlign:"left"}}>
+          <div style={{width:46,height:46,borderRadius:"50%",background:"linear-gradient(135deg,rgba(200,168,75,.4),rgba(200,168,75,.15))",
+            border:"1.5px solid rgba(200,168,75,.5)",display:"flex",alignItems:"center",justifyContent:"center",
+            fontSize:20,flexShrink:0}}>🏌️</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:16,letterSpacing:".03em"}}>@{profile.username}</div>
+            {profile.tagline && <div style={{fontSize:13,color:"rgba(200,168,75,.6)",fontStyle:"italic",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>"{profile.tagline}"</div>}
+          </div>
+          <button className="gi-btn gi-btn-ghost" style={{fontSize:11,padding:"6px 10px"}} onClick={onEditProfile}>EDIT</button>
+        </div>
+
+        {/* Stats row */}
+        {stats.games > 0 && (
+          <div className="gi-card" style={{padding:"10px 0",display:"grid",gridTemplateColumns:"repeat(4,1fr)",marginBottom:20,gap:0}}>
+            {[
+              [stats.games, "GAMES"],
+              [`${stats.correctRate}%`, "CORRECT"],
+              [stats.perfect, "PERFECT"],
+              [`${trophyCount}/${TROPHY_DEFS.length}`, "TROPHIES"],
+            ].map(([v,l]) => (
+              <div key={l} className="gi-stat">
+                <div className="gi-stat-val">{v}</div>
+                <div className="gi-stat-label">{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button className="gi-btn gi-btn-gold" style={{fontSize:18,padding:"17px 56px",marginBottom:14,width:"100%"}} onClick={onPlay}>
+          ⛳ &nbsp; PLAY 5 HOLES
+        </button>
+
+        <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+          <button className="gi-btn gi-btn-outline" onClick={onStats}>📊 Stats</button>
+          <button className="gi-btn gi-btn-outline" onClick={onTrophies}>🏆 Trophy Case</button>
+          <button className="gi-btn gi-btn-outline" onClick={onAdmin} style={{opacity:.5,fontSize:12,padding:"8px 12px"}}>⚙️ Logos</button>
+        </div>
+
+        {stats.bestTime && (
+          <div style={{marginTop:18,color:"rgba(200,168,75,.45)",fontSize:12,letterSpacing:".07em"}}>
+            🏅 BEST PERFECT ROUND: {fmtFull(stats.bestTime)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   GAME SCREEN
+═══════════════════════════════════════════════════════ */
+function GameScreen({ game, profile, logos, onComplete }) {
+  const [qIdx, setQIdx]       = useState(0);
+  const [results, setResults] = useState([]);
+  const [times, setTimes]     = useState([]);
+  const [picked, setPicked]   = useState([]); // index chosen per Q
+  const [phase, setPhase]     = useState("idle"); // idle | sel | done
+  const [selectedOpt, setSel] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const qStart                = useRef(Date.now());
+  const timerRef              = useRef(null);
+
+  const q = game[qIdx];
+  const totalElapsed = times.reduce((a,b)=>a+b,0) + elapsed;
+
+  // Per-question timer
+  useEffect(() => {
+    qStart.current = Date.now();
+    setElapsed(0);
+    timerRef.current = setInterval(() => setElapsed(Date.now() - qStart.current), 87);
+    return () => clearInterval(timerRef.current);
+  }, [qIdx]);
+
+  const choose = (optIdx) => {
+    if (phase !== "idle") return;
+    clearInterval(timerRef.current);
+    const t = Date.now() - qStart.current;
+    const correct = optIdx === q.ansIdx;
+    setSel(optIdx);
+    setPhase("sel");
+    playClick();
+
+    setTimeout(() => {
+      setPhase("done");
+      correct ? playCupIn() : playWrong();
+
+      const newResults = [...results, correct];
+      const newTimes   = [...times, t];
+      const newPicked  = [...picked, optIdx];
+      setResults(newResults); setTimes(newTimes); setPicked(newPicked);
+
+      if (qIdx < 4) {
+        setTimeout(() => {
+          setQIdx(i => i+1);
+          setSel(null); setPhase("idle");
+        }, 1400);
+      } else {
+        setTimeout(() => onComplete({ results:newResults, times:newTimes, picked:newPicked }), 1600);
+      }
+    }, 480);
+  };
+
+  const optState = (i) => {
+    if (phase === "idle") return "idle";
+    if (phase === "sel")  return i === selectedOpt ? "sel" : "idle";
+    if (i === q.ansIdx)   return "ok";
+    if (i === selectedOpt) return "bad";
+    return "idle";
+  };
+
+  const isOver6s = elapsed > 6000;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",maxWidth:520,margin:"0 auto",width:"100%",padding:"18px 16px",gap:14}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            {Array.from({length:5},(_,i)=>(
+              <div key={i} className={`gi-dot ${i<qIdx?(results[i]?"gi-dot-correct":"gi-dot-wrong"):i===qIdx?"gi-dot-active":""}`}/>
+            ))}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+            <div className={`gi-timer ${isOver6s?"gi-timer-fast":""}`}>{fmtFull(elapsed)}</div>
+            <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>THIS HOLE</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontWeight:700,color:"rgba(200,168,75,.8)",fontSize:18}}>
+              {results.filter(Boolean).length}/{qIdx}
+            </div>
+            <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".08em"}}>SCORE</div>
+          </div>
+        </div>
+
+        <div className="gi-progress-wrap"><div className="gi-progress-fill" style={{width:`${(qIdx/5)*100}%`}}/></div>
+
+        {/* Logo spotlight */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 0",position:"relative"}}>
+          <div className="gi-spotlight" style={{width:240,height:240}}/>
+          <div className="gi-logo-ring" style={{width:144,height:144,position:"relative",zIndex:1}}>
+            <CourseLogo course={q.correct} size={144} allowSuggest={true} uploadedData={logos && logos[q.correct.id]}/>
+          </div>
+          <div style={{marginTop:14,textAlign:"center",position:"relative",zIndex:1}}>
+            <div style={{fontSize:12,color:"rgba(200,168,75,.5)",letterSpacing:".14em",marginBottom:4}}>
+              HOLE {qIdx+1} OF 5
+            </div>
+            <div style={{fontSize:11,color:"rgba(200,180,140,.4)",letterSpacing:".06em"}}>
+              {q.correct.logoUrl ? "Which course does this logo belong to?" : "Which course does this emblem represent?"}
+            </div>
+            {!q.correct.logoUrl && (
+              <div style={{fontSize:9,color:"rgba(200,168,75,.25)",marginTop:4,letterSpacing:".04em"}}>
+                Have the real logo? Tap 📷 to upload it
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Options */}
+        <div style={{display:"flex",flexDirection:"column",gap:9,flex:1}}>
+          {q.opts.map((opt, i) => (
+            <OptBtn key={opt.id} letter={"ABCD"[i]} option={opt}
+              state={optState(i)} onClick={()=>choose(i)} disabled={phase!=="idle"}/>
+          ))}
+        </div>
+
+        {/* Total time */}
+        <div style={{textAlign:"center",fontSize:12,color:"rgba(200,168,75,.3)",letterSpacing:".08em"}}>
+          ⏱ TOTAL: {fmtFull(totalElapsed)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESULTS SCREEN
+═══════════════════════════════════════════════════════ */
+function ResultsScreen({ game, results, times, picked, profile, stats, newTrophies, onPlayAgain, onHome }) {
+  const score = results.filter(Boolean).length;
+  const total = times.reduce((a,b)=>a+b,0);
+  const [copied, setCopied] = useState(false);
+  const [toastTrophy, setToastTrophy] = useState(null);
+  const toastIdx = useRef(0);
+
+  useEffect(() => {
+    if (!newTrophies.length) return;
+    let i = 0;
+    const show = () => {
+      if (i < newTrophies.length) { setToastTrophy(newTrophies[i]); i++; setTimeout(show, 4000); }
+    };
+    const t = setTimeout(show, 800);
+    return () => clearTimeout(t);
+  }, []);
+
+  const shareText = generateShare(game, results, times, profile, stats);
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(shareText); setCopied(true); setTimeout(()=>setCopied(false), 2200); }
+    catch(e) { alert(shareText); }
+  };
+
+  const msgs = ["🏆 HOLE-IN-ONE ROUND!", "🔥 IMPRESSIVE ROUND!", "✓ SOLID ROUND", "Keep practicing, caddie!", "Time to hit the range..."];
+  const msgIdx = score === 5 ? 0 : score === 4 ? 1 : score === 3 ? 2 : score === 2 ? 3 : 4;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      {toastTrophy && <div key={toastTrophy.id} className="gi-toast">🏆 Trophy Unlocked: {toastTrophy.name} {toastTrophy.icon}</div>}
+
+      <div className="gi-screen" style={{maxWidth:520,margin:"0 auto",padding:"24px 16px",display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* Score hero */}
+        <div style={{textAlign:"center",padding:"20px 0"}}>
+          <div style={{fontSize:58,fontWeight:900,fontFamily:"'Playfair Display',serif"}}>
+            <span className="gi-gold">{score}</span>
+            <span style={{color:"rgba(200,168,75,.3)",fontSize:36}}>/5</span>
+          </div>
+          <div style={{fontSize:15,color:"rgba(200,180,140,.7)",letterSpacing:".06em",marginTop:4}}>{msgs[msgIdx]}</div>
+          <div style={{display:"flex",gap:18,justifyContent:"center",marginTop:12}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#f0dfa0"}}>{fmtFull(total)}</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>TOTAL TIME</div>
+            </div>
+            <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#f0dfa0"}}>{fmtFull(Math.min(...times))}</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>FASTEST</div>
+            </div>
+            <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#f0dfa0"}}>{stats.correctRate}%</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>LIFETIME</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Q breakdown */}
+        <div className="gi-card" style={{padding:"14px 14px",display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",marginBottom:4,fontWeight:700}}>SCORECARD</div>
+          {game.map((q, i) => {
+            const correct = results[i];
+            const pickedCourse = q.opts[picked[i]];
+            return (
+              <div key={i} className={`gi-result-row ${correct?"gi-result-correct":"gi-result-wrong"}`}>
+                <div style={{width:32,height:32,borderRadius:"50%",overflow:"hidden",background:"white",flexShrink:0,
+                  border:`1.5px solid ${correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"}`}}>
+                  <CourseLogo course={q.correct} size={32} uploadedData={logos && logos[q.correct.id]}/>
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {q.correct.name}
+                  </div>
+                  <div style={{fontSize:11,color:"rgba(200,180,140,.5)",marginTop:1}}>📍 {q.correct.loc}</div>
+                  {!correct && (
+                    <div style={{fontSize:11,color:"rgba(255,140,140,.6)",marginTop:2}}>
+                      You picked: {pickedCourse?.name} — {pickedCourse?.loc}
+                    </div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:12,color:"rgba(200,168,75,.55)"}}>{fmtFull(times[i])}</div>
+                  <div style={{fontSize:16}}>{correct?"✅":"❌"}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Lifetime */}
+        <div className="gi-card" style={{padding:"12px 16px",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:0}}>
+          {[[stats.games,"PLAYED"],[`${stats.correctRate}%`,"CORRECT"],[stats.perfect,"PERFECT"],[stats.bestTime?fmtFull(stats.bestTime):"—","BEST TIME"]].map(([v,l])=>(
+            <div key={l} className="gi-stat">
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,
+                background:"linear-gradient(to bottom, #f0dfa0, #c8a84b)",
+                WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>{v}</div>
+              <div className="gi-stat-label" style={{fontSize:9}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:16,padding:"15px"}} onClick={onPlayAgain}>
+            ⛳ &nbsp; PLAY AGAIN
+          </button>
+          <div style={{display:"flex",gap:10}}>
+            <button className="gi-btn gi-btn-outline" style={{flex:1}} onClick={copy}>
+              {copied ? "✓ COPIED!" : "📋 SHARE SCORE"}
+            </button>
+            <button className="gi-btn gi-btn-outline" style={{flex:1}} onClick={onHome}>
+              🏠 HOME
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   STATS SCREEN
+═══════════════════════════════════════════════════════ */
+function StatsScreen({ stats, history, onBack }) {
+  const recent = [...history].reverse().slice(0, 10);
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:520,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:4}}>
+          <button className="gi-btn gi-btn-ghost" style={{padding:"8px 0"}} onClick={onBack}>← BACK</button>
+          <div className="gi-serif gi-gold" style={{fontSize:24,fontWeight:700}}>Stats</div>
+        </div>
+
+        {/* Big stats grid */}
+        <div className="gi-card" style={{padding:"6px 0",display:"grid",gridTemplateColumns:"repeat(3,1fr)"}}>
+          {[
+            [stats.games, "GAMES PLAYED"],
+            [`${stats.correctRate}%`, "CORRECT RATE"],
+            [stats.perfect, "PERFECT ROUNDS"],
+            [stats.maxStreak, "BEST STREAK"],
+            [stats.bestTime ? fmtFull(stats.bestTime) : "—", "BEST TIME"],
+            [stats.fastestAnswer ? fmtFull(stats.fastestAnswer) : "—", "FASTEST ANSWER"],
+          ].map(([v,l]) => (
+            <div key={l} className="gi-stat" style={{borderBottom:"1px solid rgba(200,168,75,.08)",padding:"16px 10px"}}>
+              <div className="gi-stat-val" style={{fontSize:24}}>{v}</div>
+              <div className="gi-stat-label">{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Recent games */}
+        <div className="gi-card" style={{padding:"14px"}}>
+          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",marginBottom:12,fontWeight:700}}>RECENT GAMES</div>
+          {recent.length === 0 && <div style={{color:"rgba(200,180,140,.3)",fontSize:13,textAlign:"center",padding:"12px 0"}}>No games yet — tee it up!</div>}
+          {recent.map((g, i) => {
+            const score = g.results.filter(Boolean).length;
+            const total = g.times.reduce((a,b)=>a+b,0);
+            return (
+              <div key={i} style={{display:"flex",alignItems:"center",padding:"8px 0",
+                borderBottom: i<recent.length-1 ? "1px solid rgba(200,168,75,.08)" : "none",gap:12}}>
+                <div style={{fontSize:20,width:28,textAlign:"center"}}>{score===5?"⭐":"⛳"}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color: score>=4?"#f0dfa0":"rgba(200,180,140,.7)"}}>
+                    {score}/5 &nbsp;
+                    {"✅".repeat(score)}{"❌".repeat(5-score)}
+                  </div>
+                  <div style={{fontSize:11,color:"rgba(200,168,75,.35)",marginTop:2}}>
+                    {new Date(g.ts).toLocaleDateString()} · {fmtFull(total)}
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:"rgba(200,168,75,.5)"}}>{fmtFull(Math.min(...g.times))} fastest</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   TROPHY SCREEN
+═══════════════════════════════════════════════════════ */
+function TrophiesScreen({ earned, onBack }) {
+  const earnedCount = TROPHY_DEFS.filter(t => earned.has(t.id)).length;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:520,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:4}}>
+          <button className="gi-btn gi-btn-ghost" style={{padding:"8px 0"}} onClick={onBack}>← BACK</button>
+          <div>
+            <div className="gi-serif gi-gold" style={{fontSize:24,fontWeight:700}}>Trophy Case</div>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>{earnedCount}/{TROPHY_DEFS.length} EARNED</div>
+          </div>
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {TROPHY_DEFS.map(t => {
+            const isEarned = earned.has(t.id);
+            const rc = RARITY_COLORS[t.rarity];
+            return (
+              <div key={t.id} className={`gi-trophy-card ${isEarned?"gi-trophy-earned":"gi-trophy-locked"}`}>
+                <div className="gi-trophy-icon" style={{background: isEarned ? `radial-gradient(circle, ${rc}44, ${rc}11)` : "rgba(255,255,255,.04)", border: `1.5px solid ${isEarned?rc+"66":"rgba(255,255,255,.08)"}`}}>
+                  {t.icon}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontWeight:700,fontSize:15,color: isEarned ? "#f0dfa0" : "rgba(200,180,140,.4)"}}>{t.name}</span>
+                    <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",color:rc,textTransform:"uppercase",
+                      padding:"2px 6px",border:`1px solid ${rc}55`,borderRadius:2}}>{t.rarity}</span>
+                  </div>
+                  <div style={{fontSize:12,color: isEarned ? "rgba(200,180,140,.65)" : "rgba(200,180,140,.25)",marginTop:3}}>{t.desc}</div>
+                </div>
+                <div style={{fontSize:20}}>{isEarned?"✓":"🔒"}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   ADMIN SCREEN — Logo Manager
+═══════════════════════════════════════════════════════ */
+function AdminLogoCard({ course, uploadedData, onSave, onRemove }) {
+  const [dragging, setDragging] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [flash, setFlash]       = useState(false);
+  const [imgErr, setImgErr]     = useState(false);
+  const fileRef                 = useRef(null);
+  const dragCount               = useRef(0);
+
+  const status = uploadedData ? "up" : course.logoUrl ? "bi" : "mi";
+  const displayUrl = uploadedData || (course.logoUrl && !imgErr ? course.logoUrl : null);
+  const borderColor = flash ? "#4caf7d" : dragging ? "#c8a84b" : status === "up" ? "rgba(76,175,80,.5)" : "rgba(255,255,255,.1)";
+
+  const readAndSave = function(file) {
+    if (!file) return;
+    setSaving(true);
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      onSave(course.id, e.target.result);
+      setSaving(false);
+      setFlash(true);
+      setTimeout(function(){ setFlash(false); }, 1500);
+    };
+    reader.onerror = function() {
+      setSaving(false);
+      alert("Could not read file.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = function(e) {
+    e.preventDefault();
+    dragCount.current = 0;
+    setDragging(false);
+    var files = e.dataTransfer.files;
+    if (files && files.length > 0) { readAndSave(files[0]); return; }
+    var items = e.dataTransfer.items;
+    if (items && items.length > 0 && items[0].kind === "file") { readAndSave(items[0].getAsFile()); }
+  };
+
+  const doSave = function() {};
+
+  return (
+    <div
+      onDrop={handleDrop}
+      onDragEnter={function(e){ e.preventDefault(); dragCount.current++; setDragging(true); }}
+      onDragOver={function(e){ e.preventDefault(); }}
+      onDragLeave={function(e){ e.preventDefault(); dragCount.current--; if(dragCount.current<=0){dragCount.current=0;setDragging(false);} }}
+      style={{background:"#0d1520",border:"2px solid "+borderColor,borderRadius:12,padding:"12px 10px",
+        display:"flex",flexDirection:"column",alignItems:"center",gap:7,position:"relative",
+        boxShadow:flash?"0 0 14px rgba(76,175,80,.4)":dragging?"0 0 14px rgba(200,168,75,.3)":"none",
+        transition:"border-color .2s,box-shadow .2s"}}>
+
+      <div style={{position:"absolute",top:5,left:7,fontSize:9,color:"rgba(200,168,75,.3)",fontFamily:"monospace"}}>#{course.rank}</div>
+      <div style={{position:"absolute",top:7,right:7,width:7,height:7,borderRadius:"50%",
+        background:status==="up"?"#4caf7d":status==="bi"?"#c8a84b":"#333"}} />
+
+      <div onClick={function(){ fileRef.current && fileRef.current.click(); }}
+        style={{width:76,height:76,borderRadius:"50%",cursor:"pointer",overflow:"hidden",flexShrink:0,
+          background:displayUrl?"white":"rgba(255,255,255,.04)",
+          border:"1px dashed "+(dragging?"rgba(200,168,75,.7)":"rgba(255,255,255,.1)"),
+          display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {displayUrl
+            ? <img src={displayUrl} alt="" style={{width:"100%",height:"100%",objectFit:"contain",padding:4}} onError={function(){setImgErr(true);}}/>
+            : <div style={{textAlign:"center",pointerEvents:"none"}}>
+                <div style={{fontSize:24}}>{course.sym}</div>
+                <div style={{fontSize:7,color:"rgba(200,168,75,.3)"}}>DROP</div>
+              </div>
+        }
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}}
+        onChange={function(e){ readAndSave(e.target.files && e.target.files[0]); }} />
+
+      <div style={{fontSize:11,fontWeight:700,color:"#e8d5a0",textAlign:"center",lineHeight:1.3,wordBreak:"break-word"}}>{course.name}</div>
+      <div style={{fontSize:9,color:"rgba(200,168,75,.33)",textAlign:"center"}}>{course.loc}</div>
+
+      {saving ? (
+        <div style={{fontSize:10,color:"rgba(200,168,75,.6)"}}>Saving…</div>
+      ) : flash ? (
+        <div style={{fontSize:10,color:"rgba(76,175,80,.9)",fontWeight:700}}>✓ Saved!</div>
+      ) : uploadedData ? (
+        <button onClick={function(){ onRemove(course.id); }}
+          style={{width:"100%",background:"rgba(255,60,60,.07)",border:"1px solid rgba(255,60,60,.2)",
+            borderRadius:6,color:"rgba(255,100,100,.4)",padding:"4px 0",cursor:"pointer",fontSize:9}}>Remove</button>
+      ) : (
+        <div style={{fontSize:9,color:"rgba(255,255,255,.12)",textAlign:"center"}}>
+          {status==="bi" ? "⚠ URL" : "drop to add"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminScreen({ logos={}, onSaveLogo, onRemoveLogo, onBack }) {
+  const [filter, setFilter]     = useState("all");
+  const [search, setSearch]     = useState("");
+  const [sortBy, setSortBy]     = useState("alpha");
+  const [toast, setToast]       = useState(null);
+  const [importText, setImportText] = useState("");
+  const [showImport, setShowImport] = useState(false);
+
+  const handleSave = function(id, dataUrl) {
+    onSaveLogo(id, dataUrl);
+    var c = ALL_COURSES.find(function(c){ return c.id===id; });
+    setToast("✓ " + (c ? c.name : id) + " saved");
+    setTimeout(function(){ setToast(null); }, 2000);
+  };
+
+  const handleRemove = function(id) { onRemoveLogo(id); };
+
+  const handleExport = async function() {
+    var result = await db.loadAll();
+    var json = JSON.stringify(result);
+    var a = document.createElement("a");
+    a.href = "data:application/octet-stream," + encodeURIComponent(json);
+    a.download = "golf-iq-logos.json";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ document.body.removeChild(a); }, 100);
+    setToast("✓ Exported " + Object.keys(result).length + " logos");
+    setTimeout(function(){ setToast(null); }, 3000);
+  };
+
+  const handleImport = function() {
+    try {
+      var data = JSON.parse(importText);
+      var ids = Object.keys(data);
+      ids.forEach(function(id) {
+        var val = data[id];
+        if (typeof val === "string" && val.indexOf("data:") === 0) {
+          onSaveLogo(id, val);
+        }
+      });
+      setShowImport(false);
+      setImportText("");
+      setToast("✓ Imported " + ids.length + " logos");
+      setTimeout(function(){ setToast(null); }, 3000);
+    } catch(err) {
+      alert("Import failed — paste the full exported text.");
+    }
+  };
+
+  var uploadCount  = Object.keys(logos).length;
+  var builtinCount = ALL_COURSES.filter(function(c){ return c.logoUrl && !logos[c.id]; }).length;
+  var missingCount = ALL_COURSES.filter(function(c){ return !c.logoUrl && !logos[c.id]; }).length;
+
+  var sorted = ALL_COURSES.map(function(c,i){ return Object.assign({},c,{rank:i+1}); });
+  if (sortBy === "alpha") {
+    sorted = sorted.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  }
+  var visible = sorted.filter(function(c) {
+    var st = logos[c.id] ? "up" : c.logoUrl ? "bi" : "mi";
+    if (filter === "uploaded" && st !== "up") return false;
+    if (filter === "builtin"  && st !== "bi") return false;
+    if (filter === "missing"  && st !== "mi") return false;
+    if (search) {
+      var q = search.toLowerCase();
+      return c.name.toLowerCase().indexOf(q) >= 0 || c.loc.toLowerCase().indexOf(q) >= 0;
+    }
+    return true;
+  });
+
+  var filterBtns = [
+    {label:"All",       key:"all",      count:100},
+    {label:"Uploaded",  key:"uploaded", count:uploadCount},
+    {label:"URL",       key:"builtin",  count:builtinCount},
+    {label:"Missing",   key:"missing",  count:missingCount},
+  ];
+
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px",position:"relative",zIndex:1}}>
+
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← Back</button>
+          <div style={{flex:1}}>
+            <div className="gi-serif gi-gold" style={{fontSize:22,fontWeight:700}}>Logo Manager</div>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.4)"}}>{uploadCount} uploaded · drag images onto cards</div>
+          </div>
+          <button onClick={handleExport}
+            style={{padding:"7px 14px",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:700,
+              background:"rgba(76,175,80,.15)",border:"1px solid rgba(76,175,80,.4)",color:"rgba(76,175,80,.9)"}}>
+            ⬇ Export
+          </button>
+          <button onClick={function(){ setShowImport(function(v){return !v;}); setExportText(null); }}
+            style={{padding:"7px 14px",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:700,
+              background:"rgba(200,168,75,.15)",border:"1px solid rgba(200,168,75,.4)",color:"rgba(200,168,75,.9)"}}>
+            ⬆ Import
+          </button>
+        </div>
+
+        {showImport && (
+          <div style={{marginBottom:12,background:"rgba(0,0,0,.5)",borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.7)",marginBottom:6}}>
+              Paste your previously exported text here:
+            </div>
+            <textarea value={importText}
+              onChange={function(e){ setImportText(e.target.value); }}
+              placeholder="Paste exported logo data here..."
+              style={{width:"100%",height:72,background:"rgba(0,0,0,.4)",border:"1px solid rgba(200,168,75,.3)",
+                borderRadius:6,color:"rgba(200,168,75,.8)",fontSize:10,padding:8,
+                boxSizing:"border-box",resize:"none",display:"block"}}/>
+            <div style={{display:"flex",gap:8,marginTop:6}}>
+              <button onClick={handleImport}
+                style={{padding:"5px 14px",fontSize:11,cursor:"pointer",fontWeight:700,
+                  background:"rgba(200,168,75,.2)",border:"1px solid rgba(200,168,75,.5)",
+                  borderRadius:6,color:"rgba(200,168,75,.9)"}}>✓ Import</button>
+              <button onClick={function(){ setShowImport(false); setImportText(""); }}
+                style={{padding:"5px 10px",fontSize:11,cursor:"pointer",
+                  background:"transparent",border:"1px solid rgba(255,255,255,.2)",
+                  borderRadius:6,color:"rgba(255,255,255,.4)"}}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          {filterBtns.map(function(f){
+            return (
+              <button key={f.key} onClick={function(){ setFilter(f.key); }}
+                style={{padding:"6px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:700,
+                  background:filter===f.key?"rgba(200,168,75,.25)":"rgba(255,255,255,.06)",
+                  border:"1px solid "+(filter===f.key?"rgba(200,168,75,.6)":"rgba(255,255,255,.1)"),
+                  color:filter===f.key?"#c8a84b":"rgba(255,255,255,.4)"}}>
+                {f.label} ({f.count})
+              </button>
+            );
+          })}
+          <input value={search} onChange={function(e){ setSearch(e.target.value); }}
+            placeholder="Search…"
+            style={{flex:1,minWidth:100,background:"rgba(255,255,255,.05)",
+              border:"1px solid rgba(200,168,75,.2)",borderRadius:20,color:"#e8d5a0",
+              padding:"6px 14px",fontSize:12,outline:"none"}}/>
+          {[{key:"rank",label:"# Rank"},{key:"alpha",label:"A–Z"}].map(function(s){
+            return (
+              <button key={s.key} onClick={function(){ setSortBy(s.key); }}
+                style={{padding:"6px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:700,
+                  background:sortBy===s.key?"rgba(200,168,75,.2)":"rgba(255,255,255,.04)",
+                  border:"1px solid "+(sortBy===s.key?"rgba(200,168,75,.5)":"rgba(255,255,255,.1)"),
+                  color:sortBy===s.key?"#c8a84b":"rgba(255,255,255,.3)"}}>
+                {s.label}
+              </button>
+            );
+          })}
+          <span style={{fontSize:11,color:"rgba(200,168,75,.35)"}}>{visible.length} shown</span>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
+          {visible.map(function(c){
+            return (
+              <AdminLogoCard key={c.id} course={c}
+                uploadedData={logos[c.id]||null}
+                onSave={handleSave}
+                onRemove={handleRemove}/>
+            );
+          })}
+        </div>
+
+        <div style={{marginTop:24,paddingTop:12,borderTop:"1px solid rgba(200,168,75,.1)",
+          display:"flex",gap:16,flexWrap:"wrap",fontSize:9,color:"rgba(200,168,75,.25)"}}>
+          <span>🟢 Uploaded</span>
+          <span>🟡 Built-in URL</span>
+          <span>⚫ Missing</span>
+          <span>Click circle or drop image onto card to upload</span>
+        </div>
+      </div>
+
+      {toast && (
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",
+          background:"rgba(30,120,60,.95)",color:"white",borderRadius:20,
+          padding:"8px 20px",fontSize:13,fontWeight:700,zIndex:9999,
+          boxShadow:"0 4px 20px rgba(0,0,0,.5)"}}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════════════ */
+export default function GolfIQ() {
+  const [screen, setScreen]       = useState("loading");
+  const [profile, setProfile]     = useState(null);
+  const [history, setHistory]     = useState([]);
+  const [trophies, setTrophies]   = useState(new Set());
+  const [currentGame, setGame]    = useState(null);
+  const [gameResult, setResult]   = useState(null);
+  const [newTrophies, setNewTr]   = useState([]);
+  const [logos, setLogos]         = useState({});
+  const lastGameTs                = useRef(null);
+
+  // Load persisted data
+  useEffect(() => {
+    (async () => {
+      const [p, h, tr] = await Promise.all([S.get("gp-profile"), S.get("gp-history"), S.get("gp-trophies")]);
+      if (p) setProfile(p);
+      if (h) setHistory(h);
+      if (tr) setTrophies(new Set(tr));
+      // Load logos from Supabase
+      const logoData = await db.loadAll();
+      if (Object.keys(logoData).length > 0) setLogos(logoData);
+      setScreen(p ? "home" : "setup");
+    })();
+  }, []);
+
+  const saveLogo = function(id, dataUrl, silent) {
+    var img = new Image();
+    img.onload = function() {
+      var MAX = 120;
+      var scale = Math.min(MAX / img.width, MAX / img.height, 1);
+      var canvas = document.createElement("canvas");
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      var small = canvas.toDataURL("image/jpeg", 0.8);
+      setLogos(function(prev){ return Object.assign({}, prev, {[id]: small}); });
+      if (!silent) db.save(id, small);
+    };
+    img.onerror = function() { alert("Could not read image."); };
+    img.src = dataUrl;
+  };
+
+  const removeLogo = (id) => {
+    db.remove(id);
+    setLogos(prev => {
+      const n = Object.assign({}, prev);
+      delete n[id];
+      return n;
+    });
+  };
+
+  const stats = calcStats(history);
+
+  const saveProfile = async (p) => { setProfile(p); await S.set("gp-profile", p); setScreen("home"); };
+
+  const startGame = () => {
+    const quick = lastGameTs.current && Date.now() - lastGameTs.current < 30*60*1000;
+    setGame(makeGame()); setScreen("playing");
+  };
+
+  const onGameComplete = async ({ results, times, picked }) => {
+    lastGameTs.current = Date.now();
+    const gameRecord = { results, times, picked, totalMs: times.reduce((a,b)=>a+b,0), ts: Date.now() };
+    const newHistory = [...history, gameRecord];
+
+    // Quick return check
+    const hadQuick = history.length > 0 && (Date.now() - history[history.length-1].ts < 30*60*1000);
+    const augmentedStats = calcStats(newHistory);
+    if (hadQuick) augmentedStats.quickReturn = true;
+
+    const { earned, newOnes } = checkTrophies(augmentedStats, trophies);
+
+    setHistory(newHistory);
+    setTrophies(earned);
+    setResult({ results, times, picked });
+    setNewTr(newOnes);
+    setScreen("results");
+
+    await Promise.all([S.set("gp-history", newHistory), S.set("gp-trophies", [...earned])]);
+  };
+
+  if (screen === "loading") return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <style>{css}</style>
+      <div className="gi-stars"/>
+      <div style={{fontSize:14,color:"rgba(200,168,75,.4)",letterSpacing:".2em"}}>LOADING…</div>
+    </div>
+  );
+
+  return (
+    <>
+      <style>{css}</style>
+      {screen === "setup"    && <SetupScreen onSave={saveProfile}/>}
+      {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} onPlay={startGame} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}
+      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
+      {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
+      {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
+      {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
+      {screen === "admin"    && <AdminScreen logos={logos} onSaveLogo={saveLogo} onRemoveLogo={removeLogo} onBack={()=>setScreen("home")}/>}
+    </>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<GolfIQ />);
+  </script>
+</body>
+</html>
