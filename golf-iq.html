@@ -1452,7 +1452,7 @@ function GameScreen({ game, profile, logos, onComplete }) {
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 0",position:"relative"}}>
           <div className="gi-spotlight" style={{width:240,height:240}}/>
           <div className="gi-logo-ring" style={{width:144,height:144,position:"relative",zIndex:1}}>
-            <CourseLogo course={q.correct} size={144} allowSuggest={true} uploadedData={logoMap && logoMap[q.correct.id]}/>
+            <CourseLogo course={q.correct} size={144} allowSuggest={true} uploadedData={logos && logos[q.correct.id]}/>
           </div>
           <div style={{marginTop:14,textAlign:"center",position:"relative",zIndex:1}}>
             <div style={{fontSize:12,color:"rgba(200,168,75,.5)",letterSpacing:".14em",marginBottom:4}}>
@@ -1558,7 +1558,7 @@ function ResultsScreen({ game, results, times, picked, profile, stats, newTrophi
               <div key={i} className={`gi-result-row ${correct?"gi-result-correct":"gi-result-wrong"}`}>
                 <div style={{width:32,height:32,borderRadius:"50%",overflow:"hidden",background:"white",flexShrink:0,
                   border:`1.5px solid ${correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"}`}}>
-                  <CourseLogo course={q.correct} size={32} uploadedData={logoMap && logoMap[q.correct.id]}/>
+                  <CourseLogo course={q.correct} size={32} uploadedData={logoMap ? logoMap[q.correct.id] : null}/>
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
