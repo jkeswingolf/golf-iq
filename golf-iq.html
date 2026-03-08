@@ -1012,203 +1012,29 @@ function ClubCrest({ course, size }) {
    + "Suggest Logo" button so users can paste better URLs.
 ═══════════════════════════════════════════════════════ */
 function CourseLogo({ course, size = 120, allowSuggest = false, uploadedData = null }) {
-  const [savedData, setSavedData]   = useState(null);  // base64 data URL from storage
-  const [failed, setFailed]         = useState(false);
-  const [open, setOpen]             = useState(false);
-  const [dragging, setDragging]     = useState(false);
-  const [preview, setPreview]       = useState(null);  // base64 preview before save
-  const [saving, setSaving]         = useState(false);
-  const [saved, setSaved]           = useState(false);
-  const fileInputRef = useRef(null);
-  const imgRef = useRef(null);
+  const [failed, setFailed] = useState(false);
 
-  // What actually shows: uploaded base64 > built-in URL
-  const activeUrl = savedData || course.logoUrl;
-
-  // Load saved base64 logo from storage on mount
-  useEffect(() => {
-    if (uploadedData) { setSavedData(uploadedData); setFailed(false); }
-  }, [uploadedData]);
-
-  const onErr = () => { if (!savedData) setFailed(true); };
-  const onLoad = () => {
-    const img = imgRef.current;
-    if (img && img.naturalWidth > 0 && img.naturalWidth < 8) onErr();
-  };
-
-  // Convert file → base64 and show preview
-  const processFile = (file) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
-    reader.readAsDataURL(file);
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault(); setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
-  };
-
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
-  };
-
-  const saveLogo = async () => {
-    if (!preview) return;
-    setSaving(true);
-    try {
-      // Resize to max 120x120 before saving
-      const resized = await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const MAX = 120;
-          const scale = Math.min(MAX/img.width, MAX/img.height, 1);
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(img.width * scale);
-          canvas.height = Math.round(img.height * scale);
-          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/png", 0.85));
-        };
-        img.onerror = () => resolve(preview);
-        img.src = preview;
-      });
-      db.save(course.id, resized);
-      // saved via db.save above
-      if (!check || !check.value) throw new Error("verify failed");
-      setSavedData(resized);
-      setFailed(false);
-      setPreview(null);
-      setOpen(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch(e) {
-      alert("Save failed — image may be too large. Try a smaller file.");
-    }
-    setSaving(false);
-  };
-
-  const removeLogo = async () => {
-    db.remove(course.id);
-    setSavedData(null);
-    setPreview(null);
-    setFailed(!course.logoUrl);
-    setOpen(false);
-  };
+  // uploadedData from App state takes priority, then built-in URL
+  const activeUrl = uploadedData || (!failed && course.logoUrl ? course.logoUrl : null);
 
   return (
     <div style={{ position:"relative", display:"inline-block" }}>
-      {/* ── Main logo display ── */}
       <div style={{
         width: size, height: size, borderRadius: "50%", overflow: "hidden",
         flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-        background: (failed || !activeUrl) ? "transparent" : "white",
-        transition: "box-shadow .3s",
-        ...(saved ? { boxShadow:"0 0 0 3px #4caf7d, 0 0 20px rgba(76,175,80,.5)" } : {}),
+        background: activeUrl ? "white" : "transparent",
       }}>
-        {activeUrl && !failed
-          ? <img ref={imgRef} src={activeUrl} alt={course.name}
+        {activeUrl
+          ? <img src={activeUrl} alt={course.name}
               style={{ width:"100%", height:"100%", objectFit:"contain", padding:6, display:"block" }}
-              onError={onErr} onLoad={onLoad} />
+              onError={() => setFailed(true)} />
           : <ClubCrest course={course} size={size} />
         }
       </div>
-
-      {/* ── Upload button ── */}
-      {allowSuggest && !open && (
-        <button onClick={() => { setOpen(true); setPreview(null); }}
-          title="Upload logo image"
-          style={{
-            position:"absolute", bottom:-6, right:-6,
-            background: savedData ? "rgba(76,175,80,0.2)" : "rgba(200,168,75,0.15)",
-            border: `1px solid ${savedData ? "rgba(76,175,80,0.5)" : "rgba(200,168,75,0.4)"}`,
-            borderRadius:"50%", width:26, height:26, cursor:"pointer",
-            fontSize:13, display:"flex", alignItems:"center", justifyContent:"center",
-            color: savedData ? "rgba(76,175,80,0.9)" : "rgba(200,168,75,0.8)", lineHeight:1,
-          }}>{savedData ? "✓" : "📷"}</button>
-      )}
-
-      {/* ── Upload popover ── */}
-      {open && (
-        <div style={{
-          position:"absolute", top:"110%", left:"50%", transform:"translateX(-50%)",
-          background:"#0a1420", border:"1px solid rgba(200,168,75,0.45)",
-          borderRadius:12, padding:"14px 16px", zIndex:999, width:260,
-          boxShadow:"0 12px 32px rgba(0,0,0,0.7)",
-        }}>
-          <div style={{fontSize:11,color:"rgba(200,168,75,0.8)",marginBottom:10,
-            letterSpacing:".08em",fontWeight:600,textAlign:"center"}}>
-            📷 ADD LOGO · {course.name.toUpperCase().split(" ").slice(0,3).join(" ")}
-          </div>
-
-          {/* Drop zone */}
-          <div
-            onDrop={handleDrop}
-            onDragOver={e=>{e.preventDefault();setDragging(true);}}
-            onDragLeave={()=>setDragging(false)}
-            onClick={()=>fileInputRef.current?.click()}
-            style={{
-              border: `2px dashed ${dragging ? "rgba(200,168,75,0.8)" : "rgba(200,168,75,0.3)"}`,
-              borderRadius:8, padding:"14px 10px", textAlign:"center",
-              cursor:"pointer", marginBottom:10, transition:"all .2s",
-              background: dragging ? "rgba(200,168,75,0.08)" : "rgba(255,255,255,0.03)",
-            }}>
-            {preview
-              ? <img src={preview} alt="preview"
-                  style={{width:72,height:72,objectFit:"contain",borderRadius:8,
-                    background:"white",padding:4,display:"block",margin:"0 auto 6px"}} />
-              : <div style={{fontSize:28,marginBottom:4}}>🖼️</div>
-            }
-            <div style={{fontSize:11,color:"rgba(200,168,75,0.6)",lineHeight:1.4}}>
-              {preview
-                ? <span style={{color:"rgba(76,175,80,0.9)"}}>✓ Ready to save</span>
-                : <><strong style={{color:"rgba(200,168,75,0.85)"}}>Drop image here</strong><br/>or click to browse</>
-              }
-            </div>
-          </div>
-          <input ref={fileInputRef} type="file" accept="image/*"
-            style={{display:"none"}} onChange={handleFileChange} />
-
-          {/* Action buttons */}
-          <div style={{display:"flex",gap:6,marginBottom:8}}>
-            <button onClick={saveLogo} disabled={!preview || saving}
-              style={{
-                flex:1, background: preview ? "rgba(76,175,80,0.2)" : "rgba(255,255,255,0.05)",
-                border:`1px solid ${preview ? "rgba(76,175,80,0.5)" : "rgba(255,255,255,0.1)"}`,
-                borderRadius:6, color: preview ? "rgba(76,175,80,0.95)" : "rgba(255,255,255,0.3)",
-                padding:"7px 0", cursor: preview ? "pointer" : "not-allowed",
-                fontSize:12, fontWeight:700, letterSpacing:".05em",
-              }}>
-              {saving ? "Saving…" : "✓ Save Logo"}
-            </button>
-            <button onClick={()=>{setOpen(false);setPreview(null);}}
-              style={{
-                background:"transparent", border:"1px solid rgba(255,255,255,0.15)",
-                borderRadius:6, color:"rgba(255,255,255,0.4)", padding:"7px 10px",
-                cursor:"pointer", fontSize:12,
-              }}>✕</button>
-          </div>
-
-          {savedData && (
-            <button onClick={removeLogo}
-              style={{
-                width:"100%", background:"rgba(255,60,60,0.08)",
-                border:"1px solid rgba(255,60,60,0.25)", borderRadius:6,
-                color:"rgba(255,100,100,0.7)", padding:"5px 0",
-                cursor:"pointer", fontSize:11,
-              }}>Remove uploaded logo</button>
-          )}
-
-          <div style={{fontSize:9,color:"rgba(200,168,75,0.3)",marginTop:8,
-            textAlign:"center",lineHeight:1.4}}>
-            Saved as embedded image · works offline · permanent
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
 
 /* ═══════════════════════════════════════════════════════
    ANSWER BUTTON
