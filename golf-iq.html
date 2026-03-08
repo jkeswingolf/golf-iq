@@ -1984,10 +1984,10 @@ function AdminScreen({ logos={}, onSaveLogo, onRemoveLogo, onBack }) {
 
         <div style={{marginTop:24,paddingTop:12,borderTop:"1px solid rgba(200,168,75,.1)",
           display:"flex",gap:16,flexWrap:"wrap",fontSize:9,color:"rgba(200,168,75,.25)"}}>
-          <span>🟢 Uploaded</span>
-          <span>🟡 Built-in URL</span>
-          <span>⚫ Missing</span>
-          <span>Click circle or drop image onto card to upload</span>
+          <span>🟢 Your upload (saved to cloud)</span>
+          <span>🟡 Auto logo (URL in game data)</span>
+          <span>⚫ Missing — needs your upload</span>
+          <span>Drop an image onto any card to upload</span>
         </div>
       </div>
 
@@ -2035,16 +2035,18 @@ function GolfIQ() {
   const saveLogo = function(id, dataUrl, silent) {
     var img = new Image();
     img.onload = function() {
-      var MAX = 120;
+      var MAX = 160;
       var scale = Math.min(MAX / img.width, MAX / img.height, 1);
       var canvas = document.createElement("canvas");
       canvas.width  = Math.round(img.width  * scale);
       canvas.height = Math.round(img.height * scale);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      var small = canvas.toDataURL("image/jpeg", 0.8);
-      // Warn if still too large for Supabase (> 50KB base64)
+      // Try progressively lower quality until small enough
+      var small = canvas.toDataURL("image/jpeg", 0.7);
+      if (small.length > 51200) small = canvas.toDataURL("image/jpeg", 0.5);
+      if (small.length > 51200) small = canvas.toDataURL("image/jpeg", 0.3);
       if (small.length > 51200) {
-        alert("Image too large to save (" + Math.round(small.length/1024) + "KB). Please use a smaller image file.");
+        alert("Image too large even after compression (" + Math.round(small.length/1024) + "KB). Try a simpler/smaller image.");
         return;
       }
       setLogos(function(prev){ return Object.assign({}, prev, {[id]: small}); });
