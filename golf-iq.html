@@ -2042,6 +2042,11 @@ function GolfIQ() {
       canvas.height = Math.round(img.height * scale);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
       var small = canvas.toDataURL("image/jpeg", 0.8);
+      // Warn if still too large for Supabase (> 50KB base64)
+      if (small.length > 51200) {
+        alert("Image too large to save (" + Math.round(small.length/1024) + "KB). Please use a smaller image file.");
+        return;
+      }
       setLogos(function(prev){ return Object.assign({}, prev, {[id]: small}); });
       if (!silent) db.save(id, small);
     };
