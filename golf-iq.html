@@ -465,14 +465,12 @@ const ALL_COURSES = [
     domain:"sandhillsgolfclub.com",    init:"SH",   col:"#8a6b2e", sym:"🏜️" },
 
   // ── RESORT & PUBLIC — strongest brand marks ───────────
-  { id:"pinehurst-2",      name:"Pinehurst No. 2",                 loc:"Pinehurst, NC",
+  { id:"pinehurst-2",      name:"Pinehurst",                       loc:"Pinehurst, NC",
     logoUrl:"https://cdn.prod.website-files.com/67ab6ef769ff843db623d709/67ec8d07cb93c574cc812794_pinehurs.jpeg",
     domain:"pinehurst.com",            init:"P",    col:"#7a5c1a", sym:"🧶" },
   { id:"tpc-sawgrass",     name:"TPC Sawgrass",                    loc:"Ponte Vedra Beach, FL",
     logoUrl:"https://tpc.com/sawgrass/wp-content/uploads/sites/51/2016/08/sawgrass-website.png",
     domain:"tpc.com",                  init:"TPC",  col:"#0b3a7a", sym:"🐊" },
-  { id:"tpc-scottsdale",   name:"TPC Scottsdale",                  loc:"Scottsdale, AZ",
-    domain:"tpc.com",                  init:"TPC",  col:"#8a4a12", sym:"🌵" },
   { id:"bethpage-black",   name:"Bethpage Black",                  loc:"Farmingdale, NY",
     domain:"bethpagegolf.com",         init:"BB",   col:"#1a1a2e", sym:"🖤" },
   { id:"torrey-pines",     name:"Torrey Pines (South Course)",     loc:"La Jolla, CA",
@@ -496,14 +494,10 @@ const ALL_COURSES = [
     domain:"seapines.com",             init:"HT",   col:"#8a1a1a", sym:"🏮" },
   { id:"erin-hills",       name:"Erin Hills",                      loc:"Erin, WI",
     domain:"erinhills.com",            init:"EH",   col:"#2e6b9a", sym:"🍀" },
-  { id:"shadow-creek",     name:"Shadow Creek",                    loc:"North Las Vegas, NV",
-    domain:"shadowcreek.com",          init:"SC",   col:"#0e2a1a", sym:"💫" },
   { id:"chambers-bay",     name:"Chambers Bay",                    loc:"University Place, WA",
     domain:"chambersbaygolf.com",      init:"CB",   col:"#5c6b3a", sym:"🌊" },
-  { id:"streamsong-black", name:"Streamsong Black",                loc:"Bowling Green, FL",
+  { id:"streamsong-black", name:"Streamsong",                      loc:"Bowling Green, FL",
     domain:"streamsongresort.com",     init:"SS",   col:"#1a1a1a", sym:"⚫" },
-  { id:"greenbrier",       name:"The Greenbrier (Old White)",      loc:"White Sulphur Springs, WV",
-    domain:"greenbrier.com",           init:"G",    col:"#1a4a2e", sym:"🏰" },
 
   // ── GOLDEN AGE PRIVATE LEGENDS (continued) ───────────
   { id:"prairie-dunes",    name:"Prairie Dunes Country Club",      loc:"Hutchinson, KS",
@@ -573,8 +567,6 @@ const ALL_COURSES = [
     domain:"thequarry.com",            init:"Q",    col:"#8a6030", sym:"⛏️" },
   { id:"canyata",          name:"Canyata",                         loc:"Savanna, IL",
     domain:"canyatagolf.com",          init:"CYT",  col:"#4a6a5a", sym:"🌾" },
-  { id:"yeamans-hall",     name:"Yeamans Hall Club",               loc:"Hanahan, SC",
-    domain:"yeamanshall.com",          init:"YH",   col:"#3a5010", sym:"🏡" },
   { id:"dallas-national",  name:"Dallas National Golf Club",       loc:"Dallas, TX",
     domain:"dallasnational.com",       init:"DN",   col:"#6a2010", sym:"⭐" },
   { id:"sebonack",         name:"Sebonack Golf Club",              loc:"Southampton, NY",
@@ -612,10 +604,6 @@ const ALL_COURSES = [
     domain:"calusapinesgolf.com",      init:"CPG",  col:"#3a6a2a", sym:"🌴" },
 
   // ── RESORT & SEMI-PRIVATE GEMS ────────────────────────
-  { id:"streamsong-red",   name:"Streamsong Red",                  loc:"Bowling Green, FL",
-    domain:"streamsongresort.com",     init:"SSR",  col:"#7a1a1a", sym:"🚂" },
-  { id:"streamsong-blue",  name:"Streamsong Blue",                 loc:"Bowling Green, FL",
-    domain:"streamsongresort.com",     init:"SSB",  col:"#1a3a8a", sym:"💧" },
   { id:"tpc-harding",      name:"TPC Harding Park",               loc:"San Francisco, CA",
     domain:"tpc.com",                  init:"TPC",  col:"#1a5a6a", sym:"🌉" },
   { id:"wolf-creek",       name:"Wolf Creek Golf Club",            loc:"Mesquite, NV",
@@ -626,17 +614,32 @@ const ALL_COURSES = [
     domain:"belaircountryclub.org",    init:"BA",   col:"#5a2a4a", sym:"🌟" },
   { id:"mcarthur",         name:"McArthur Golf Club",              loc:"Hobe Sound, FL",
     domain:"mcarthurgolfclub.com",     init:"MAC",  col:"#3a6a3a", sym:"🦅" },
-  { id:"pinehurst-4",      name:"Pinehurst No. 4",                 loc:"Pinehurst, NC",
-    domain:"pinehurst.com",            init:"P4",   col:"#8a6820", sym:"⛳" },
   { id:"ballyhack",        name:"Ballyhack Golf Club",             loc:"Roanoke, VA",
     domain:"ballyhackgolf.com",        init:"BHG",  col:"#3a5a4a", sym:"🗡️" },
   { id:"sedge-valley",     name:"Sedge Valley",                    loc:"Nekoosa, WI",
     domain:"sandvalley.com",           init:"SEV",  col:"#5a7a4a", sym:"🌾" },
-  { id:"wade-hampton-2",   name:"Camargo Club (Cincinnati)",        loc:"Indian Hill, OH",
-    domain:"camargoclub.com",          init:"CAM",  col:"#2e5a20", sym:"🦌" },
   { id:"old-sandwich",     name:"Old Sandwich Golf Club",           loc:"Plymouth, MA",
     domain:"oldsandwichgolfclub.com",  init:"OSG",  col:"#5a4a2a", sym:"🥪" },
 ];
+
+/* ═══════════════════════════════════════════════════════
+   EXCLUDED COURSES — Real Top-100 courses parked here
+   because their logos are text-only, missing, or dead
+   giveaways. These do NOT appear in the active game.
+   Revisit when better imagery surfaces, or use as content
+   for a future "no-logo mode" with text-clue puzzles.
+═══════════════════════════════════════════════════════ */
+const EXCLUDED_COURSES = [
+  { id:"shadow-creek",   name:"Shadow Creek",                loc:"North Las Vegas, NV",
+    reason:"Text-only wordmark — gives away the answer.",        date_added:"2026-05-16" },
+  { id:"tpc-scottsdale", name:"TPC Scottsdale",              loc:"Scottsdale, AZ",
+    reason:"No identifiable text-free logo available.",          date_added:"2026-05-16" },
+  { id:"greenbrier",     name:"The Greenbrier (Old White)",  loc:"White Sulphur Springs, WV",
+    reason:"No identifiable text-free logo available.",          date_added:"2026-05-16" },
+  { id:"yeamans-hall",   name:"Yeamans Hall Club",           loc:"Hanahan, SC",
+    reason:"No identifiable text-free logo available.",          date_added:"2026-05-16" },
+];
+
 
 
 /* ═══════════════════════════════════════════════════════
