@@ -1163,7 +1163,7 @@ function SetupScreen({ onSave }) {
 /* ═══════════════════════════════════════════════════════
    HOME SCREEN
 ═══════════════════════════════════════════════════════ */
-function HomeScreen({ profile, stats, trophyCount, onPlay, onStats, onTrophies, onEditProfile, onAdmin }) {
+function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday, onPlay, onDaily, onStats, onTrophies, onEditProfile, onAdmin }) {
   return (
     <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
       <div className="gi-stars"/><div className="gi-spotlight"/>
@@ -1205,8 +1205,27 @@ function HomeScreen({ profile, stats, trophyCount, onPlay, onStats, onTrophies, 
           </div>
         )}
 
-        <button className="gi-btn gi-btn-gold" style={{fontSize:18,padding:"17px 56px",marginBottom:14,width:"100%"}} onClick={onPlay}>
-          ⛳ &nbsp; PLAY 5 HOLES
+        {/* DAILY COURSE — primary CTA */}
+        <button className="gi-btn gi-btn-gold"
+          style={{fontSize:18, padding:"17px 32px", marginBottom:10, width:"100%",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:14}}
+          onClick={onDaily}>
+          <span style={{fontSize:22}}>⛳</span>
+          <span>{dailyPlayedToday ? "VIEW TODAY'S RESULT" : "PLAY TODAY'S COURSE"}</span>
+          {dailyStreak && dailyStreak.streak > 0 && (
+            <span style={{fontSize:13, padding:"3px 10px", borderRadius:12,
+              background: dailyStreak.state==="paused" ? "rgba(80,80,80,.5)" : "rgba(0,0,0,.25)",
+              color: dailyStreak.state==="paused" ? "#aaa" : "#fff"}}>
+              🔥{dailyStreak.streak}
+            </span>
+          )}
+        </button>
+
+        {/* 5-HOLE GAME — secondary */}
+        <button className="gi-btn gi-btn-outline"
+          style={{fontSize:14, padding:"12px 32px", marginBottom:14, width:"100%"}}
+          onClick={onPlay}>
+          ⛳ 5-HOLE PRACTICE ROUND
         </button>
 
         <div style={{display:"flex",gap:10,justifyContent:"center"}}>
@@ -2801,11 +2820,12 @@ function GolfIQ() {
     <>
       <style>{css}</style>
       {screen === "setup"    && <SetupScreen onSave={saveProfile}/>}
-      {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} onPlay={startGame} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}
-      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
+      {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} dailyStreak={computeStreak(dailyHistory)} dailyPlayedToday={dailyHistory.some(h => h.day === getETDateString())} onPlay={startGame} onDaily={()=>setScreen("daily")} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
       {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
       {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
+      {screen === "daily"       && <DailyScreen profile={profile} logos={logos} dailyHistory={dailyHistory} onComplete={onDailyComplete} onBack={()=>setScreen("home")} onViewLeaderboard={()=>setScreen("leaderboard")}/>}
+      {screen === "leaderboard" && <LeaderboardScreen profile={profile} onBack={()=>setScreen("daily")}/>}
       {screen === "admin"    && <AdminScreen logos={logos} onSaveLogo={saveLogo} onRemoveLogo={removeLogo} onBack={()=>setScreen("home")}/>}
     </>
   );
