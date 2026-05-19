@@ -1874,6 +1874,826 @@ function AdminScreen({ logos={}, onSaveLogo, onRemoveLogo, onBack }) {
 /* ═══════════════════════════════════════════════════════
    MAIN APP
 ═══════════════════════════════════════════════════════ */
+    /* ═══════════════════════════════════════════════════════
+   TIER A — DAILY COURSE ROTATION POOL (30 courses)
+   ───────────────────────────────────────────────────────
+   The iconic Top 30 — courses a knowledgeable golf fan
+   should reasonably identify. These are the ONLY courses
+   that appear in the Daily Course. Speed Round draws from
+   the full Top 100. Repeats every ~90 days (30 courses
+   × ~3x/year = strong habit cadence without monotony).
+   ───────────────────────────────────────────────────────
+   To expand Tier A: add course id below + log in change
+   log block at top of file. Aim for additions only after
+   logo quality + analytics support inclusion.
+   ═══════════════════════════════════════════════════════ */
+const TIER_A_IDS = [
+  // The untouchables (5)
+  "augusta", "pebble-beach", "pine-valley", "cypress-point", "shinnecock",
+  // Major championship venues (10)
+  "oakmont", "winged-foot", "merion", "bethpage-black", "pinehurst-2",
+  "southern-hills", "medinah-3", "baltusrol", "oak-hill", "olympic-club",
+  // Modern icons + resort destinations (8)
+  "whistling", "kiawah", "bandon-dunes", "pacific-dunes", "tpc-sawgrass",
+  "torrey-pines", "harbour-town", "riviera",
+  // Private legends with strong logos (7)
+  "seminole", "national-golf", "chicago-golf", "crystal-downs",
+  "sand-hills", "the-country-club", "muirfield-v",
+];
+
+/* ═══════════════════════════════════════════════════════
+   DAILY SEQUENCE — Predetermined order, curated.
+   ───────────────────────────────────────────────────────
+   Day index → course id. Cycles back to start at end of
+   array. Curated to avoid clusters (no two desert courses
+   back-to-back, no two Bandon properties in same week).
+   Tournament-week overrides can be applied via the
+   DAILY_OVERRIDES map below.
+   ───────────────────────────────────────────────────────
+   To regenerate sequence: shuffle TIER_A_IDS once and
+   paste result here. Order persists thereafter.
+   ═══════════════════════════════════════════════════════ */
+const DAILY_SEQUENCE = [
+  "augusta", "merion", "pacific-dunes", "oakmont", "national-golf",
+  "kiawah", "winged-foot", "harbour-town", "shinnecock", "muirfield-v",
+  "tpc-sawgrass", "crystal-downs", "bethpage-black", "seminole", "torrey-pines",
+  "medinah-3", "chicago-golf", "whistling", "pebble-beach", "southern-hills",
+  "bandon-dunes", "the-country-club", "olympic-club", "sand-hills", "baltusrol",
+  "riviera", "pine-valley", "oak-hill", "pinehurst-2", "cypress-point",
+];
+
+/* ═══════════════════════════════════════════════════════
+   TOURNAMENT OVERRIDES — Save iconic courses for their
+   majors. Map "YYYY-MM-DD" → course id. Overrides the
+   sequence on that specific date.
+   ───────────────────────────────────────────────────────
+   Example future entries (add as tournament dates confirm):
+     "2026-04-09": "augusta",      // Masters Thursday
+     "2026-06-18": "shinnecock",   // US Open week
+     "2026-07-16": "royal-liverpool", // Open (when added)
+     "2026-05-14": "quail-hollow", // PGA Championship
+   ═══════════════════════════════════════════════════════ */
+const DAILY_OVERRIDES = {
+  // populated as tournament schedule is confirmed
+};
+
+/* ═══════════════════════════════════════════════════════
+   DAILY START DATE — Day 1 of the Daily Course feature.
+   Used to compute "Day N" labels in share strings and to
+   determine which course is today's puzzle.
+   ───────────────────────────────────────────────────────
+   IMPORTANT: do not change this once Daily Course is live.
+   Changing it shifts every player's day count.
+   ═══════════════════════════════════════════════════════ */
+const DAILY_EPOCH = "2026-05-25";  // Memorial Day 2026 — placeholder; adjust at launch
+/* ═══════════════════════════════════════════════════════
+   DAILY HELPERS — Date math and course selection
+   ═══════════════════════════════════════════════════════ */
+
+// Returns "YYYY-MM-DD" in ET timezone (puzzle reveal is midnight ET)
+function getETDateString(d) {
+  d = d || new Date();
+  // ET is UTC-5 (EST) or UTC-4 (EDT). Use Intl for accuracy across DST.
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit"
+  });
+  return fmt.format(d);  // returns "YYYY-MM-DD"
+}
+
+// Days since DAILY_EPOCH, in ET. Day 1 = epoch day itself.
+function getDayNumber(dateStr) {
+  dateStr = dateStr || getETDateString();
+  const epoch = new Date(DAILY_EPOCH + "T12:00:00Z");
+  const today = new Date(dateStr + "T12:00:00Z");
+  const diff = Math.floor((today - epoch) / (1000 * 60 * 60 * 24));
+  return diff + 1;  // Day 1 = epoch
+}
+
+// Today's course: override > sequence rotation
+function getCourseOfDay(dateStr) {
+  dateStr = dateStr || getETDateString();
+  if (DAILY_OVERRIDES[dateStr]) {
+    const ov = ALL_COURSES.find(c => c.id === DAILY_OVERRIDES[dateStr]);
+    if (ov) return ov;
+  }
+  const dayNum = getDayNumber(dateStr);
+  if (dayNum < 1) return null;  // pre-launch
+  const idx = (dayNum - 1) % DAILY_SEQUENCE.length;
+  const id = DAILY_SEQUENCE[idx];
+  return ALL_COURSES.find(c => c.id === id);
+}
+
+/* ═══════════════════════════════════════════════════════
+   DISTRACTOR SELECTION FOR DAILY
+   ───────────────────────────────────────────────────────
+   Pulls 3 wrong-answer choices from the full Top 100 pool.
+   Honors the initials-matching rule for letter-logo
+   courses. Deterministic per day so all players see the
+   same 4 options (essential for Wordle-style fairness).
+   ═══════════════════════════════════════════════════════ */
+
+// Courses whose logos are letters/initials — distractors must match initial
+const INITIALS_LOGO_COURSES = {
+  "sebonack":      "S",
+  "sand-hills":    "SH",
+  "sand-valley-gc":"SV",
+  "sheep-ranch":   "SR",
+  "quarry-lq":     "Q",
+  "peachtree":     "P",  // PCG technically; P is sufficient
+};
+
+// Deterministic shuffle seeded by date string
+function seededShuffle(arr, seed) {
+  // Simple xorshift seeded from string
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const rand = () => {
+    h ^= h << 13; h ^= h >>> 17; h ^= h << 5;
+    return ((h >>> 0) % 100000) / 100000;
+  };
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function getDailyOptions(correctCourse, dateStr) {
+  dateStr = dateStr || getETDateString();
+  const correctInitial = INITIALS_LOGO_COURSES[correctCourse.id];
+
+  let candidatePool;
+  if (correctInitial) {
+    // Initial-match rule: distractors must start with the same letter(s)
+    candidatePool = ALL_COURSES.filter(c =>
+      c.id !== correctCourse.id &&
+      c.name.toUpperCase().startsWith(correctInitial.toUpperCase())
+    );
+    // Fallback if pool too thin — use first-letter match
+    if (candidatePool.length < 3) {
+      const firstChar = correctInitial[0].toUpperCase();
+      candidatePool = ALL_COURSES.filter(c =>
+        c.id !== correctCourse.id &&
+        c.name.toUpperCase().startsWith(firstChar)
+      );
+    }
+    // Final fallback if still thin: pull from anywhere
+    if (candidatePool.length < 3) {
+      candidatePool = ALL_COURSES.filter(c => c.id !== correctCourse.id);
+    }
+  } else {
+    candidatePool = ALL_COURSES.filter(c => c.id !== correctCourse.id);
+  }
+
+  // Deterministic shuffle by date — every player gets same options
+  const shuffled = seededShuffle(candidatePool, dateStr + correctCourse.id);
+  const distractors = shuffled.slice(0, 3);
+  const allOpts = seededShuffle([...distractors, correctCourse], dateStr + "-final");
+  return {
+    opts: allOpts,
+    ansIdx: allOpts.findIndex(o => o.id === correctCourse.id)
+  };
+}
+
+/* ═══════════════════════════════════════════════════════
+   STREAK MATH — Knowledge-based with 7-day pause window
+   ───────────────────────────────────────────────────────
+   Returns one of:
+     { state: "active",  streak: N, lastPlayedDay: "YYYY-MM-DD" }
+     { state: "paused",  streak: N, daysSinceLastPlay: D }
+     { state: "broken",  streak: 0 }
+     { state: "fresh",   streak: 0 }   // never played
+   ═══════════════════════════════════════════════════════ */
+
+const STREAK_PAUSE_MAX = 7;  // miss 7+ days and streak resets
+
+// dailyHistory: array of { day: "YYYY-MM-DD", correct: boolean }
+function computeStreak(dailyHistory, today) {
+  today = today || getETDateString();
+  if (!dailyHistory || dailyHistory.length === 0) {
+    return { state: "fresh", streak: 0 };
+  }
+
+  // Sort chronologically
+  const history = [...dailyHistory].sort((a, b) => a.day.localeCompare(b.day));
+  const last = history[history.length - 1];
+
+  // If the last play was wrong, streak is broken regardless of timing
+  // BUT only if it's the most recent attempt — we walk back from the end
+  // and count consecutive correct days.
+
+  let streak = 0;
+  let lastCorrectDay = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].correct) {
+      // Check chronological continuity
+      if (lastCorrectDay === null) {
+        lastCorrectDay = history[i].day;
+        streak = 1;
+      } else {
+        const gap = daysBetween(history[i].day, lastCorrectDay);
+        if (gap === 1) {
+          streak++;
+          lastCorrectDay = history[i].day;
+        } else {
+          break;  // gap in correct answers — streak ends here
+        }
+      }
+    } else {
+      // Wrong answer breaks the streak
+      if (lastCorrectDay === null) {
+        return { state: "broken", streak: 0 };
+      }
+      break;
+    }
+  }
+
+  if (streak === 0) return { state: "fresh", streak: 0 };
+
+  const daysSince = daysBetween(lastCorrectDay, today);
+
+  if (daysSince === 0) {
+    // Played today, correct — active
+    return { state: "active", streak, lastPlayedDay: lastCorrectDay };
+  }
+  if (daysSince <= STREAK_PAUSE_MAX) {
+    return { state: "paused", streak, daysSinceLastPlay: daysSince };
+  }
+  // Beyond pause window — broken
+  return { state: "broken", streak: 0 };
+}
+
+function daysBetween(dayA, dayB) {
+  const a = new Date(dayA + "T12:00:00Z");
+  const b = new Date(dayB + "T12:00:00Z");
+  return Math.round((b - a) / (1000 * 60 * 60 * 24));
+}
+
+/* ═══════════════════════════════════════════════════════
+   DAILY SHARE STRING
+   ───────────────────────────────────────────────────────
+   Spoiler-free: only reveals time and streak, never the
+   course or whether the player got it right (the emoji
+   does that, optionally). Format intentionally short for
+   group-chat sharing.
+   ═══════════════════════════════════════════════════════ */
+function generateDailyShare(dayNum, timeMs, correct, streakInfo) {
+  const sec = (timeMs / 1000).toFixed(1);
+  const emoji = correct ? "⛳" : "💨";
+  const result = correct ? `got it in ${sec}s` : `missed in ${sec}s`;
+  let streakBit = "";
+  if (streakInfo.state === "active" && streakInfo.streak > 1) {
+    streakBit = ` 🔥${streakInfo.streak} streak`;
+  }
+  return `Golf Course IQ — Day ${dayNum}\n${emoji} ${result}${streakBit}\n\nPlay → golf-iq.app`;
+}
+/* ═══════════════════════════════════════════════════════
+   SUPABASE — Daily Course tables and helpers
+   ───────────────────────────────────────────────────────
+   THREE NEW TABLES NEEDED IN SUPABASE (run these once
+   in the Supabase SQL editor — see SQL block at bottom).
+
+   1. daily_plays      — every Daily Course attempt (GOAT data)
+   2. monthly_streaks  — current month's public leaderboard
+   3. annual_goat      — Year 1 silent tracking (no UI exposure)
+   ═══════════════════════════════════════════════════════ */
+
+const dailyDb = {
+  // Log a Daily Course play. Always called whether correct or wrong.
+  // Powers analytics, monthly leaderboard, and silent GOAT tracking.
+  logPlay: async function({ username, dayNum, dayStr, courseId, correct, timeMs, streakAfter }) {
+    try {
+      await fetch(SB_URL + "/rest/v1/daily_plays", {
+        method: "POST",
+        headers: SB_HEADERS,
+        body: JSON.stringify({
+          username, day_num: dayNum, day_str: dayStr,
+          course_id: courseId, correct, time_ms: timeMs,
+          streak_after: streakAfter
+        })
+      });
+    } catch(e) { console.error("daily logPlay failed:", e); }
+  },
+
+  // Check whether this user has already played today (prevents replay)
+  hasPlayedToday: async function(username, dayStr) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/daily_plays?username=eq." + encodeURIComponent(username) +
+        "&day_str=eq." + dayStr + "&select=correct,time_ms",
+        { headers: SB_HEADERS }
+      );
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return rows.length > 0 ? rows[0] : null;
+    } catch(e) { return null; }
+  },
+
+  // Upsert into monthly streak leaderboard
+  upsertMonthlyStreak: async function({ username, monthStr, currentStreak, totalTimeMs, playsThisMonth }) {
+    try {
+      await fetch(SB_URL + "/rest/v1/monthly_streaks", {
+        method: "POST",
+        headers: Object.assign({}, SB_HEADERS, { "Prefer": "resolution=merge-duplicates" }),
+        body: JSON.stringify({
+          username, month_str: monthStr,
+          current_streak: currentStreak,
+          total_time_ms: totalTimeMs,
+          plays_this_month: playsThisMonth
+        })
+      });
+    } catch(e) { console.error("monthly streak upsert failed:", e); }
+  },
+
+  // Fetch current month leaderboard, top N + caller's rank
+  getMonthlyLeaderboard: async function(monthStr, username, topN) {
+    topN = topN || 10;
+    try {
+      // Top N by streak desc, then by total_time_ms asc (tiebreaker)
+      const r = await fetch(
+        SB_URL + "/rest/v1/monthly_streaks?month_str=eq." + monthStr +
+        "&order=current_streak.desc,total_time_ms.asc&limit=" + topN,
+        { headers: SB_HEADERS }
+      );
+      const top = r.ok ? await r.json() : [];
+
+      // Caller's rank: count of users with better (streak, time)
+      let myRank = null;
+      if (username) {
+        const me = await fetch(
+          SB_URL + "/rest/v1/monthly_streaks?month_str=eq." + monthStr +
+          "&username=eq." + encodeURIComponent(username) +
+          "&select=current_streak,total_time_ms",
+          { headers: SB_HEADERS }
+        );
+        const meRows = me.ok ? await me.json() : [];
+        if (meRows.length > 0) {
+          const myStreak = meRows[0].current_streak;
+          const myTime = meRows[0].total_time_ms;
+          // Count entries that beat me
+          const better = await fetch(
+            SB_URL + "/rest/v1/monthly_streaks?month_str=eq." + monthStr +
+            "&or=(current_streak.gt." + myStreak +
+            ",and(current_streak.eq." + myStreak + ",total_time_ms.lt." + myTime + "))" +
+            "&select=username",
+            { headers: SB_HEADERS }
+          );
+          const betterRows = better.ok ? await better.json() : [];
+          myRank = betterRows.length + 1;
+        }
+      }
+
+      return { top, myRank };
+    } catch(e) {
+      console.error("leaderboard fetch failed:", e);
+      return { top: [], myRank: null };
+    }
+  },
+
+  // SILENT — log annual GOAT progression. No UI surfaces this in Year 1.
+  // Reveal happens January 2 via separate microsite.
+  logAnnualPlay: async function({ username, year, dayNum, correct, timeMs }) {
+    try {
+      await fetch(SB_URL + "/rest/v1/annual_goat", {
+        method: "POST",
+        headers: SB_HEADERS,
+        body: JSON.stringify({
+          username, year,
+          day_num: dayNum, correct,
+          time_ms: timeMs
+        })
+      });
+    } catch(e) { /* silent */ }
+  },
+};
+
+/* ═══════════════════════════════════════════════════════
+   SQL — Run once in Supabase SQL Editor to create tables
+   ───────────────────────────────────────────────────────
+
+   -- 1. Daily plays log (powers analytics + monthly leaderboard)
+   CREATE TABLE IF NOT EXISTS daily_plays (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     day_num INTEGER NOT NULL,
+     day_str TEXT NOT NULL,
+     course_id TEXT NOT NULL,
+     correct BOOLEAN NOT NULL,
+     time_ms INTEGER NOT NULL,
+     streak_after INTEGER NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, day_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_dp_day ON daily_plays(day_str);
+   CREATE INDEX IF NOT EXISTS idx_dp_user ON daily_plays(username);
+   ALTER TABLE daily_plays ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "dp_all" ON daily_plays FOR ALL USING (true) WITH CHECK (true);
+
+   -- 2. Monthly streaks leaderboard
+   CREATE TABLE IF NOT EXISTS monthly_streaks (
+     username TEXT NOT NULL,
+     month_str TEXT NOT NULL,
+     current_streak INTEGER NOT NULL DEFAULT 0,
+     total_time_ms BIGINT NOT NULL DEFAULT 0,
+     plays_this_month INTEGER NOT NULL DEFAULT 0,
+     updated_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (username, month_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_ms_month ON monthly_streaks(month_str, current_streak DESC, total_time_ms ASC);
+   ALTER TABLE monthly_streaks ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ms_all" ON monthly_streaks FOR ALL USING (true) WITH CHECK (true);
+
+   -- 3. Annual GOAT — SILENT in Year 1, no UI exposure
+   CREATE TABLE IF NOT EXISTS annual_goat (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     year INTEGER NOT NULL,
+     day_num INTEGER NOT NULL,
+     correct BOOLEAN NOT NULL,
+     time_ms INTEGER NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ag_year_user ON annual_goat(year, username);
+   ALTER TABLE annual_goat ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ag_all" ON annual_goat FOR ALL USING (true) WITH CHECK (true);
+
+   ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   DAILY COURSE SCREEN — One puzzle, one guess
+   ───────────────────────────────────────────────────────
+   Flow:
+     1. Load: check if user has played today
+     2. If played → show result + share + leaderboard
+     3. If not → show puzzle, single guess, reveal, share
+   ═══════════════════════════════════════════════════════ */
+
+function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewLeaderboard }) {
+  const [phase, setPhase]         = useState("loading"); // loading | playing | sel | done
+  const [todayPlay, setTodayPlay] = useState(null);  // server's record if already played
+  const [course, setCourse]       = useState(null);
+  const [optsData, setOptsData]   = useState(null);
+  const [selectedOpt, setSel]     = useState(null);
+  const [elapsed, setElapsed]     = useState(0);
+  const [result, setResult]       = useState(null);  // { correct, timeMs, streakInfo }
+  const [copied, setCopied]       = useState(false);
+  const qStart                    = useRef(0);
+  const timerRef                  = useRef(null);
+
+  const dayStr = getETDateString();
+  const dayNum = getDayNumber(dayStr);
+
+  // Mount: check if already played today
+  useEffect(() => {
+    (async () => {
+      const c = getCourseOfDay(dayStr);
+      if (!c) { setPhase("notlive"); return; }
+      setCourse(c);
+      setOptsData(getDailyOptions(c, dayStr));
+
+      // Check local history first (fast path)
+      const localToday = (dailyHistory || []).find(h => h.day === dayStr);
+      if (localToday) {
+        const streakInfo = computeStreak(dailyHistory, dayStr);
+        setResult({ correct: localToday.correct, timeMs: localToday.timeMs, streakInfo });
+        setPhase("done");
+        return;
+      }
+
+      // Check server (in case played on another device)
+      if (profile && profile.username) {
+        const remote = await dailyDb.hasPlayedToday(profile.username, dayStr);
+        if (remote) {
+          const streakInfo = computeStreak(dailyHistory, dayStr);
+          setResult({ correct: remote.correct, timeMs: remote.time_ms, streakInfo });
+          setPhase("done");
+          return;
+        }
+      }
+
+      // Not played — start puzzle
+      qStart.current = Date.now();
+      timerRef.current = setInterval(() => setElapsed(Date.now() - qStart.current), 87);
+      setPhase("playing");
+    })();
+    return () => clearInterval(timerRef.current);
+  }, []);
+
+  const choose = (optIdx) => {
+    if (phase !== "playing") return;
+    clearInterval(timerRef.current);
+    const t = Date.now() - qStart.current;
+    const correct = optIdx === optsData.ansIdx;
+    setSel(optIdx);
+    setPhase("sel");
+    playClick();
+
+    setTimeout(async () => {
+      correct ? playCupIn() : playWrong();
+
+      // Build new history entry
+      const entry = { day: dayStr, dayNum, courseId: course.id, correct, timeMs: t };
+      const newHistory = [...(dailyHistory || []), entry];
+      const streakInfo = computeStreak(newHistory, dayStr);
+
+      setResult({ correct, timeMs: t, streakInfo });
+      setPhase("done");
+
+      // Persist locally
+      onComplete(entry, streakInfo);
+
+      // Persist to Supabase
+      if (profile && profile.username) {
+        await dailyDb.logPlay({
+          username: profile.username,
+          dayNum, dayStr,
+          courseId: course.id,
+          correct, timeMs: t,
+          streakAfter: streakInfo.streak
+        });
+
+        // Silent annual GOAT logging
+        const year = parseInt(dayStr.slice(0, 4), 10);
+        dailyDb.logAnnualPlay({
+          username: profile.username,
+          year, dayNum, correct, timeMs: t
+        });
+
+        // Update monthly leaderboard
+        const monthStr = dayStr.slice(0, 7);
+        const monthHistory = newHistory.filter(h => h.day.startsWith(monthStr));
+        const monthTimeMs = monthHistory.reduce((s, h) => s + h.timeMs, 0);
+        dailyDb.upsertMonthlyStreak({
+          username: profile.username,
+          monthStr,
+          currentStreak: streakInfo.streak,
+          totalTimeMs: monthTimeMs,
+          playsThisMonth: monthHistory.length
+        });
+      }
+    }, 480);
+  };
+
+  const optState = (i) => {
+    if (phase === "playing") return "idle";
+    if (phase === "sel")     return i === selectedOpt ? "sel" : "idle";
+    if (i === optsData.ansIdx) return "ok";
+    if (i === selectedOpt)     return "bad";
+    return "idle";
+  };
+
+  const shareText = result ? generateDailyShare(dayNum, result.timeMs, result.correct, result.streakInfo) : "";
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(shareText); setCopied(true); setTimeout(()=>setCopied(false), 2200); }
+    catch(e) { alert(shareText); }
+  };
+
+  // ── LOADING ──
+  if (phase === "loading") {
+    return (
+      <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+        <div className="gi-stars"/>
+        <div style={{fontSize:14,color:"rgba(200,168,75,.4)",letterSpacing:".2em"}}>LOADING DAILY…</div>
+      </div>
+    );
+  }
+
+  // ── PRE-LAUNCH ──
+  if (phase === "notlive") {
+    return (
+      <div className="gi-app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div className="gi-stars"/>
+        <div className="gi-screen" style={{maxWidth:420,padding:"32px 24px",textAlign:"center"}}>
+          <div style={{fontSize:48,marginBottom:12}}>⛳</div>
+          <div className="gi-serif gi-gold" style={{fontSize:28,fontWeight:900}}>Daily Course</div>
+          <div style={{color:"rgba(200,180,140,.6)",fontSize:14,marginTop:12}}>
+            The Daily Course launches {DAILY_EPOCH}.
+          </div>
+          <button className="gi-btn gi-btn-outline" onClick={onBack} style={{marginTop:24}}>← BACK</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PLAYING ──
+  if (phase === "playing" || phase === "sel") {
+    const isOver6s = elapsed > 6000;
+    return (
+      <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+        <div className="gi-stars"/>
+        <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",maxWidth:520,margin:"0 auto",width:"100%",padding:"18px 16px",gap:14}}>
+
+          {/* Header */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
+              <div className="gi-serif gi-gold" style={{fontSize:20,fontWeight:700,lineHeight:1}}>Day {dayNum}</div>
+            </div>
+            <div className={`gi-timer ${isOver6s?"gi-timer-fast":""}`} style={{fontSize:20}}>{fmtFull(elapsed)}</div>
+          </div>
+
+          {/* Logo */}
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"20px 0",position:"relative",flex:1,justifyContent:"center"}}>
+            <div className="gi-spotlight" style={{width:280,height:280}}/>
+            <div className="gi-logo-ring" style={{width:168,height:168,position:"relative",zIndex:1}}>
+              <CourseLogo course={course} size={168} uploadedData={logos && logos[course.id]}/>
+            </div>
+            <div style={{marginTop:18,textAlign:"center",position:"relative",zIndex:1}}>
+              <div style={{fontSize:13,color:"rgba(200,180,140,.5)",letterSpacing:".06em"}}>
+                One puzzle. One guess. No do-overs.
+              </div>
+            </div>
+          </div>
+
+          {/* Options */}
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {optsData.opts.map((opt, i) => (
+              <OptBtn key={opt.id} letter={"ABCD"[i]} option={opt}
+                state={optState(i)} onClick={()=>choose(i)} disabled={phase!=="playing"}/>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── DONE ──
+  const streak = result.streakInfo;
+  const msg = result.correct
+    ? streak.streak >= 7 ? "🔥 ON FIRE"
+    : streak.streak >= 3 ? "🎯 DIALED IN"
+    : "⛳ WELL PLAYED"
+    : "💨 SAND TRAP";
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:480,margin:"0 auto",padding:"24px 16px",display:"flex",flexDirection:"column",gap:18}}>
+
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
+            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,lineHeight:1}}>Day {dayNum}</div>
+          </div>
+        </div>
+
+        {/* Result card */}
+        <div className="gi-card" style={{padding:"20px",textAlign:"center"}}>
+          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700,marginBottom:8}}>{msg}</div>
+          <CourseLogo course={course} size={120} uploadedData={logos && logos[course.id]}/>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,marginTop:14,color:"#f0dfa0"}}>
+            {course.name}
+          </div>
+          <div style={{fontSize:13,color:"rgba(200,180,140,.6)",marginTop:4}}>📍 {course.loc}</div>
+
+          <div style={{display:"flex",gap:24,justifyContent:"center",marginTop:18,paddingTop:14,
+            borderTop:"1px solid rgba(200,168,75,.15)"}}>
+            <div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f0dfa0"}}>{fmtFull(result.timeMs)}</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>YOUR TIME</div>
+            </div>
+            <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
+            <div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,
+                color: streak.state==="active" ? "#f0dfa0" : streak.state==="paused" ? "#888" : "#666"}}>
+                {streak.streak > 0 ? "🔥" + streak.streak : "—"}
+              </div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>
+                {streak.state==="paused" ? "PAUSED" : "STREAK"}
+              </div>
+            </div>
+          </div>
+
+          {streak.state === "paused" && (
+            <div style={{marginTop:14,padding:"10px 14px",background:"rgba(100,100,100,.15)",
+              borderRadius:6,fontSize:12,color:"rgba(200,200,200,.7)",fontStyle:"italic"}}>
+              Your {streak.streak}-day streak is paused. Play tomorrow to keep it alive.
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:16,padding:"15px"}} onClick={copy}>
+            {copied ? "✓ COPIED!" : "📋 SHARE TODAY'S RESULT"}
+          </button>
+          <button className="gi-btn gi-btn-outline" onClick={onViewLeaderboard}>
+            🏆 THIS MONTH'S LEADERBOARD
+          </button>
+        </div>
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em",marginTop:6}}>
+          Come back tomorrow at midnight ET for a new course.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MONTHLY LEADERBOARD SCREEN
+   ═══════════════════════════════════════════════════════ */
+
+function LeaderboardScreen({ profile, onBack }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const monthStr = getETDateString().slice(0, 7);
+  const monthName = new Date(monthStr + "-15").toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  useEffect(() => {
+    (async () => {
+      const d = await dailyDb.getMonthlyLeaderboard(monthStr, profile && profile.username, 10);
+      setData(d);
+      setLoading(false);
+    })();
+  }, []);
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:520,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+          <div>
+            <div className="gi-serif gi-gold" style={{fontSize:22,fontWeight:700}}>Monthly Leaderboard</div>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>{monthName.toUpperCase()}</div>
+          </div>
+        </div>
+
+        {loading && <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:40}}>Loading…</div>}
+
+        {!loading && data && (
+          <>
+            <div className="gi-card" style={{padding:"6px 0"}}>
+              {data.top.length === 0 && (
+                <div style={{textAlign:"center",color:"rgba(200,180,140,.4)",padding:24,fontSize:13}}>
+                  Be the first on the board this month.
+                </div>
+              )}
+              {data.top.map((row, i) => {
+                const isMe = profile && row.username === profile.username;
+                return (
+                  <div key={row.username} style={{
+                    display:"flex",alignItems:"center",gap:14,padding:"12px 16px",
+                    borderBottom: i<data.top.length-1 ? "1px solid rgba(200,168,75,.08)" : "none",
+                    background: isMe ? "rgba(200,168,75,.08)" : "transparent"
+                  }}>
+                    <div style={{width:32,fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,
+                      color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)"}}>
+                      {i+1}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:isMe?700:600,fontSize:14,color:isMe?"#f0dfa0":"#e8d5a0",
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        @{row.username} {isMe && <span style={{fontSize:10,opacity:.7}}>(you)</span>}
+                      </div>
+                      <div style={{fontSize:11,color:"rgba(200,180,140,.5)",marginTop:2}}>
+                        {row.plays_this_month} plays
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#f0dfa0"}}>
+                        🔥{row.current_streak}
+                      </div>
+                      <div style={{fontSize:10,color:"rgba(200,168,75,.4)"}}>
+                        {fmtFull(row.total_time_ms)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {data.myRank && data.myRank > 10 && (
+              <div className="gi-card" style={{padding:"12px 16px",textAlign:"center"}}>
+                <div style={{fontSize:11,color:"rgba(200,168,75,.5)",letterSpacing:".1em",marginBottom:4}}>YOUR RANK</div>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#f0dfa0",fontWeight:700}}>
+                  #{data.myRank}
+                </div>
+                <div style={{fontSize:12,color:"rgba(200,180,140,.5)",marginTop:4}}>
+                  Keep your streak alive to climb.
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em",marginTop:6}}>
+          Resets the 1st of every month at 12:01am ET.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GolfIQ() {
   const [screen, setScreen]       = useState("loading");
   const [profile, setProfile]     = useState(null);
