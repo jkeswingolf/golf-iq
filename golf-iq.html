@@ -2704,14 +2704,16 @@ function GolfIQ() {
   const [newTrophies, setNewTr]   = useState([]);
   const [logos, setLogos]         = useState({});
   const lastGameTs                = useRef(null);
+  const [dailyHistory, setDailyHistory] = useState([]);  
 
   // Load persisted data
   useEffect(() => {
     (async () => {
-      const [p, h, tr] = await Promise.all([S.get("gp-profile"), S.get("gp-history"), S.get("gp-trophies")]);
+      const [p, h, tr, dh] = await Promise.all([S.get("gp-profile"), S.get("gp-history"), S.get("gp-trophies"), S.get("gp-daily-history")]);
       if (p) setProfile(p);
       if (h) setHistory(h);
       if (tr) setTrophies(new Set(tr));
+      if (dh) setDailyHistory(dh);
       // Load logos from Supabase
       const logoData = await db.loadAll();
       if (Object.keys(logoData).length > 0) setLogos(logoData);
@@ -2761,6 +2763,11 @@ function GolfIQ() {
     setGame(makeGame()); setScreen("playing");
   };
 
+  const onDailyComplete = async (entry, streakInfo) => {
+  const newDaily = [...dailyHistory, entry];
+  setDailyHistory(newDaily);
+  await S.set("gp-daily-history", newDaily);
+};
   const onGameComplete = async ({ results, times, picked }) => {
     lastGameTs.current = Date.now();
     const gameRecord = { results, times, picked, totalMs: times.reduce((a,b)=>a+b,0), ts: Date.now() };
