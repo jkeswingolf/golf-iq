@@ -379,6 +379,37 @@ html, body { height: 100%; }
    clubs it becomes the crest centerpiece. For Sand Hills
    the decorative "SH" IS their actual logo.
 ═══════════════════════════════════════════════════════ */
+    /* ═══════════════════════════════════════════════════════
+   COURSE LIBRARY CHANGE LOG
+   ───────────────────────────────────────────────────────
+   Track every consolidation, exclusion, and deletion here
+   so future edits have a clear paper trail. When you
+   change ALL_COURSES or EXCLUDED_COURSES, add a dated
+   entry below. Supabase uploads are PRESERVED for all
+   removed/consolidated courses — never delete from
+   storage; only the master record is referenced here.
+   ───────────────────────────────────────────────────────
+
+   2026-05-16 — Consolidations
+     • Pinehurst variants → single "Pinehurst" entry
+         master upload: pinehurst-2 (Putter Boy crest)
+         removed from active array: pinehurst-4, pinehurst-8, pinehurst-9
+     • Streamsong variants → single "Streamsong" entry
+         master upload: streamsong-black (shared S mark)
+         removed from active array: streamsong-red, streamsong-blue
+     • Wade Hampton duplicate cleanup
+         master upload: wade-hampton
+         removed from active array: wade-hampton-2 (was a Camargo dupe)
+
+   2026-05-16 — Exclusions (see EXCLUDED_COURSES array below)
+     • shadow-creek    — text-only wordmark
+     • tpc-scottsdale  — no identifiable text-free logo
+     • greenbrier      — no identifiable text-free logo
+     • yeamans-hall    — no identifiable text-free logo
+
+   ───────────────────────────────────────────────────────
+   FUTURE ENTRIES: add new dated blocks above this line.
+   ═══════════════════════════════════════════════════════ */
 const ALL_COURSES = [
 
   // ── THE ABSOLUTE SUMMIT ──────────────────────────────
