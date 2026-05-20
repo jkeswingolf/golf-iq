@@ -1225,13 +1225,15 @@ function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday
         <button className="gi-btn gi-btn-outline"
           style={{fontSize:14, padding:"12px 32px", marginBottom:14, width:"100%"}}
           onClick={onPlay}>
-          ⛳ 5-HOLE PRACTICE ROUND
+          ⛳ 5-HOLE QUICK GAME
         </button>
 
         <div style={{display:"flex",gap:10,justifyContent:"center"}}>
           <button className="gi-btn gi-btn-outline" onClick={onStats}>📊 Stats</button>
           <button className="gi-btn gi-btn-outline" onClick={onTrophies}>🏆 Trophy Case</button>
-          <button className="gi-btn gi-btn-outline" onClick={onAdmin} style={{opacity:.5,fontSize:12,padding:"8px 12px"}}>⚙️ Logos</button>
+          {new URLSearchParams(window.location.search).get('admin') === '1' && (
+            <button className="gi-btn gi-btn-outline" onClick={onAdmin} style={{opacity:.5,fontSize:12,padding:"8px 12px"}}>⚙️ Logos</button>
+          )}
         </div>
 
         {stats.bestTime && (
