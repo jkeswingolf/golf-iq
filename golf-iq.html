@@ -2275,7 +2275,27 @@ const dailyDb = {
       return { top: [], myRank: null };
     }
   },
-
+// Fetch the last N plays for a list of usernames (for leaderboard detail)
+  getRecentPlaysForUsers: async function(usernames, n) {
+    n = n || 3;
+    if (!usernames || usernames.length === 0) return {};
+    try {
+      const userFilter = usernames.map(function(u){ return '"' + u + '"'; }).join(",");
+      const r = await fetch(
+        SB_URL + "/rest/v1/daily_plays?username=in.(" + encodeURIComponent(userFilter) +
+        ")&order=day_str.desc&select=username,day_str,correct,time_ms",
+        { headers: SB_HEADERS }
+      );
+      if (!r.ok) return {};
+      const rows = await r.json();
+      const byUser = {};
+      rows.forEach(function(row) {
+        if (!byUser[row.username]) byUser[row.username] = [];
+        if (byUser[row.username].length < n) byUser[row.username].push(row);
+      });
+      return byUser;
+    } catch(e) { return {}; }
+  },
   // SILENT — log annual GOAT progression. No UI surfaces this in Year 1.
   // Reveal happens January 2 via separate microsite.
   logAnnualPlay: async function({ username, year, dayNum, correct, timeMs }) {
@@ -2632,7 +2652,9 @@ function LeaderboardScreen({ profile, onBack }) {
   useEffect(() => {
     (async () => {
       const d = await dailyDb.getMonthlyLeaderboard(monthStr, profile && profile.username, 10);
-      setData(d);
+      const usernames = d.top.map(function(r){ return r.username; });
+      const recentPlays = await dailyDb.getRecentPlaysForUsers(usernames, 3);
+      setData(Object.assign({}, d, { recentPlays }));
       setLoading(false);
     })();
   }, []);
@@ -2676,9 +2698,22 @@ function LeaderboardScreen({ profile, onBack }) {
                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         @{row.username} {isMe && <span style={{fontSize:10,opacity:.7}}>(you)</span>}
                       </div>
-                      <div style={{fontSize:11,color:"rgba(200,180,140,.5)",marginTop:2}}>
-                        {row.plays_this_month} plays
+                     <div style={{fontSize:11,color:"rgba(200,180,140,.5)",marginTop:2}}>
+                        {row.plays_this_month} {row.plays_this_month === 1 ? "play" : "plays"}
                       </div>
+                      {data.recentPlays && data.recentPlays[row.username] && (
+                        <div style={{fontSize:10,color:"rgba(200,168,75,.55)",marginTop:4,letterSpacing:".03em"}}>
+                          {data.recentPlays[row.username].map(function(p, idx) {
+                            const dayLabel = new Date(p.day_str + "T12:00:00Z").toLocaleDateString("en-US",{weekday:"short"});
+                            const timeS = (p.time_ms/1000).toFixed(1) + "s";
+                            return (
+                              <span key={p.day_str} style={{marginRight:8}}>
+                                {dayLabel} {p.correct ? "⛳" : "💨"} {timeS}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#f0dfa0"}}>
