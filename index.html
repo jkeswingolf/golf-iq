@@ -2906,21 +2906,26 @@ function LeaderboardScreen({ profile, onBack }) {
           <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
           <div>
             <div className="gi-serif gi-gold" style={{fontSize:22,fontWeight:700}}>Monthly Leaderboard</div>
-            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>{monthName.toUpperCase()}{!isCurrent && " · FINAL"}</div>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>STREAK CHAMPIONS</div>
           </div>
         </div>
 
         {/* Month navigation */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-          <button className="gi-btn gi-btn-outline" style={{padding:"8px 14px",fontSize:13}}
-            onClick={()=>setOffset(offset-1)}>← {new Date(shiftMonth(currentMonth, offset-1)+"-15").toLocaleString("en-US",{month:"short"})}</button>
-          <div style={{fontSize:12,color:"rgba(200,168,75,.55)",letterSpacing:".06em"}}>
-            {isCurrent ? "THIS MONTH" : "PAST MONTH"}
+          <button className="gi-btn gi-btn-outline" style={{padding:"8px 16px",fontSize:18,lineHeight:1}}
+            onClick={()=>setOffset(offset-1)} aria-label="Previous month">←</button>
+          <div style={{textAlign:"center",minWidth:140}}>
+            <div className="gi-serif gi-gold" style={{fontSize:16,fontWeight:700,lineHeight:1.1}}>
+              {new Date(monthStr + "-15").toLocaleString("en-US",{month:"long"})}
+              {" "}{monthStr.slice(0,4)}
+            </div>
+            <div style={{fontSize:10,color:"rgba(200,168,75,.5)",letterSpacing:".12em",marginTop:2}}>
+              {isCurrent ? "THIS MONTH" : "FINAL STANDINGS"}
+            </div>
           </div>
-          <button className="gi-btn gi-btn-outline" style={{padding:"8px 14px",fontSize:13,
-            opacity: isCurrent ? .3 : 1, pointerEvents: isCurrent ? "none" : "auto"}}
-            onClick={()=>{ if(!isCurrent) setOffset(offset+1); }}>
-            {new Date(shiftMonth(currentMonth, offset+1)+"-15").toLocaleString("en-US",{month:"short"})} →</button>
+          <button className="gi-btn gi-btn-outline" style={{padding:"8px 16px",fontSize:18,lineHeight:1,
+            opacity: isCurrent ? .25 : 1, pointerEvents: isCurrent ? "none" : "auto"}}
+            onClick={()=>{ if(!isCurrent) setOffset(offset+1); }} aria-label="Next month">→</button>
         </div>
 
         {loading && <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:40}}>Loading…</div>}
