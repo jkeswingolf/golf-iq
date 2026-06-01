@@ -3049,15 +3049,39 @@ function GolfIQ() {
       const logoData = await db.loadAll();
       if (Object.keys(logoData).length > 0) setLogos(logoData);
       setScreen(p ? "home" : "setup");
-      // Hydrate daily history from the cloud (cross-device truth) in the
-      // background, then merge + persist so the home-screen streak is accurate
-      // regardless of which device last played.
+      // Hydrate daily history from the cloud (cross-device truth), merge with
+      // local, and SELF-HEAL: if a play was recorded on a device but never
+      // reached the cloud (dropped network, closed tab), push it up now and
+      // refresh this month's leaderboard row from the true record.
       if (p && p.username) {
         const cloud = await dailyDb.getAllPlays(p.username);
-        if (cloud && cloud.length) {
-          const merged = mergeDailyHistory(dh || [], cloud);
-          setDailyHistory(merged);
-          await S.set("gp-daily-history", merged);
+        const merged = mergeDailyHistory(dh || [], cloud);
+        setDailyHistory(merged);
+        await S.set("gp-daily-history", merged);
+
+        // Re-log any local plays the cloud is missing
+        const cloudDays = new Set((cloud || []).map(e => e.day));
+        const missing = merged.filter(e => !cloudDays.has(e.day));
+        for (const e of missing) {
+          const upto = merged.filter(h => h.day <= e.day);
+          const sa = computeStreak(upto, e.day).streak;
+          await dailyDb.logPlay({
+            username: p.username, dayNum: e.dayNum, dayStr: e.day,
+            courseId: e.courseId, correct: e.correct, timeMs: e.timeMs, streakAfter: sa
+          });
+        }
+
+        // Rewrite the current month's leaderboard row from the merged truth
+        const monthStr = getETDateString().slice(0, 7);
+        const monthHistory = merged.filter(h => h.day.startsWith(monthStr));
+        if (monthHistory.length) {
+          const sInfo = computeStreak(merged, getETDateString());
+          await dailyDb.upsertMonthlyStreak({
+            username: p.username, monthStr,
+            currentStreak: sInfo.streak,
+            totalTimeMs: monthHistory.reduce((s, h) => s + h.timeMs, 0),
+            playsThisMonth: monthHistory.length
+          });
         }
       }
     })();
