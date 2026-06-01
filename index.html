@@ -2126,6 +2126,16 @@ function getDailyOptions(correctCourse, dateStr) {
 
 const STREAK_PAUSE_MAX = 7;  // miss 7+ days and streak resets
 
+// Merge two play-history arrays into one entry-per-day list (sorted).
+// Used to combine device-local history with the authoritative cloud
+// record so the streak reflects ALL devices, not just the current one.
+function mergeDailyHistory(a, b) {
+  const byDay = {};
+  (a || []).forEach(function(e){ if (e && e.day) byDay[e.day] = e; });
+  (b || []).forEach(function(e){ if (e && e.day) byDay[e.day] = e; }); // cloud wins on conflict
+  return Object.keys(byDay).sort().map(function(k){ return byDay[k]; });
+}
+
 // dailyHistory: array of { day: "YYYY-MM-DD", correct: boolean }
 function computeStreak(dailyHistory, today) {
   today = today || getETDateString();
@@ -2232,6 +2242,27 @@ const dailyDb = {
         })
       });
     } catch(e) { console.error("daily logPlay failed:", e); }
+  },
+
+  // Fetch this user's FULL play history from the cloud, newest-first,
+  // mapped to the local dailyHistory shape. This is the authoritative
+  // cross-device record — the streak is computed from this, not from
+  // whatever happens to be cached on the current device.
+  getAllPlays: async function(username) {
+    if (!username) return [];
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/daily_plays?username=eq." + encodeURIComponent(normalizeUsername(username)) +
+        "&order=day_str.asc&select=day_str,day_num,course_id,correct,time_ms",
+        { headers: SB_HEADERS }
+      );
+      if (!r.ok) return [];
+      const rows = await r.json();
+      return rows.map(function(row) {
+        return { day: row.day_str, dayNum: row.day_num, courseId: row.course_id,
+                 correct: row.correct, timeMs: row.time_ms };
+      });
+    } catch(e) { return []; }
   },
 
   // Check whether this user has already played today (prevents replay)
@@ -2525,6 +2556,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
   const [result, setResult]       = useState(null);  // { correct, timeMs, streakInfo }
   const [copied, setCopied]       = useState(false);
   const [emailHidden, setEmailHidden] = useState(false);
+  const [mergedHistory, setMergedHistory] = useState(null);
   const hadEmailAtMount = useRef(!!(profile && profile.email)).current;
   const qStart                    = useRef(0);
   const timerRef                  = useRef(null);
@@ -2540,27 +2572,28 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
       setCourse(c);
       setOptsData(getDailyOptions(c, dayStr));
 
-      // Check local history first (fast path)
-      const localToday = (dailyHistory || []).find(h => h.day === dayStr);
+      // Pull the authoritative cross-device history from the cloud and merge
+      // with whatever this device has locally. The streak is computed from
+      // this union so playing on a different device never shows a false "paused".
+      let merged = dailyHistory || [];
+      if (profile && profile.username) {
+        const cloud = await dailyDb.getAllPlays(profile.username);
+        merged = mergeDailyHistory(dailyHistory, cloud);
+        setMergedHistory(merged);
+      } else {
+        setMergedHistory(merged);
+      }
+
+      // Check merged history for today's play (covers all devices)
+      const localToday = merged.find(h => h.day === dayStr);
       if (localToday) {
-        const streakInfo = computeStreak(dailyHistory, dayStr);
+        const streakInfo = computeStreak(merged, dayStr);
         setResult({ correct: localToday.correct, timeMs: localToday.timeMs, streakInfo });
         setPhase("done");
         return;
       }
 
-      // Check server (in case played on another device)
-      if (profile && profile.username) {
-        const remote = await dailyDb.hasPlayedToday(profile.username, dayStr);
-        if (remote) {
-          const streakInfo = computeStreak(dailyHistory, dayStr);
-          setResult({ correct: remote.correct, timeMs: remote.time_ms, streakInfo });
-          setPhase("done");
-          return;
-        }
-      }
-
-      // Not played — start puzzle
+      // Not played anywhere — start puzzle
       qStart.current = Date.now();
       timerRef.current = setInterval(() => setElapsed(Date.now() - qStart.current), 87);
       setPhase("playing");
@@ -2582,7 +2615,8 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
 
       // Build new history entry
       const entry = { day: dayStr, dayNum, courseId: course.id, correct, timeMs: t };
-      const newHistory = [...(dailyHistory || []), entry];
+      const baseHistory = mergedHistory || dailyHistory || [];
+      const newHistory = mergeDailyHistory(baseHistory, [entry]);
       const streakInfo = computeStreak(newHistory, dayStr);
 
       setResult({ correct, timeMs: t, streakInfo });
@@ -2794,25 +2828,72 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
 }
 
 /* ═══════════════════════════════════════════════════════
-   MONTHLY LEADERBOARD SCREEN
+   MONTHLY LEADERBOARD SCREEN  (+ month navigation + trophies)
+   ───────────────────────────────────────────────────────
+   TROPHY TIERS (rank-based, tune freely):
+     🥇 GOLD   = finished #1
+     🥈 SILVER = finished #2–#3
+     🥉 BRONZE = finished #4–#10
+   Adjust the thresholds in monthlyTrophy() to taste.
    ═══════════════════════════════════════════════════════ */
+
+function monthlyTrophy(rank) {
+  if (!rank) return null;
+  if (rank === 1)  return { medal: "🥇", tier: "Gold",   label: "Champion" };
+  if (rank <= 3)   return { medal: "🥈", tier: "Silver", label: "Podium" };
+  if (rank <= 10)  return { medal: "🥉", tier: "Bronze", label: "Top 10" };
+  return null;
+}
+
+// Shift an ET "YYYY-MM" month string by N months (N negative = past).
+function shiftMonth(monthStr, delta) {
+  const y = parseInt(monthStr.slice(0,4),10);
+  const m = parseInt(monthStr.slice(5,7),10) - 1 + delta; // 0-indexed
+  const d = new Date(Date.UTC(y, m, 15));
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0");
+}
 
 function LeaderboardScreen({ profile, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [offset, setOffset] = useState(0); // 0 = current month, -1 = last month, ...
+  const [copied, setCopied] = useState(false);
 
-  const monthStr = getETDateString().slice(0, 7);
+  const currentMonth = getETDateString().slice(0, 7);
+  const monthStr = shiftMonth(currentMonth, offset);
+  const isCurrent = offset === 0;
   const monthName = new Date(monthStr + "-15").toLocaleString("en-US", { month: "long", year: "numeric" });
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      setLoading(true);
       const d = await dailyDb.getMonthlyLeaderboard(monthStr, profile && profile.username, 10);
       const usernames = d.top.map(function(r){ return r.username; });
       const recentPlays = await dailyDb.getRecentPlaysForUsers(usernames, 3);
-      setData(Object.assign({}, d, { recentPlays }));
-      setLoading(false);
+      if (!cancelled) { setData(Object.assign({}, d, { recentPlays })); setLoading(false); }
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [offset]);
+
+  // Work out the viewing player's rank + trophy in this month
+  let myRank = data && data.myRank;
+  if (data && !myRank && profile) {
+    const idx = data.top.findIndex(function(r){ return r.username === normalizeUsername(profile.username); });
+    if (idx >= 0) myRank = idx + 1;
+  }
+  const myTrophy = monthlyTrophy(myRank);
+
+  const shareTrophy = async () => {
+    if (!myTrophy) return;
+    const verb = isCurrent ? "currently holding" : "finished";
+    const place = myRank === 1 ? (isCurrent ? "leading" : "Champion") : "#" + myRank;
+    const txt = "Golf Course IQ — " + monthName + "\n" +
+      myTrophy.medal + " " + (myRank === 1 ? place : (myTrophy.label + " (" + place + ")")) +
+      "\n\nThink you can beat me? → golf-iq.app";
+    try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(()=>setCopied(false), 2200); }
+    catch(e) { alert(txt); }
+  };
 
   return (
     <div className="gi-app" style={{minHeight:"100vh"}}>
@@ -2822,22 +2903,56 @@ function LeaderboardScreen({ profile, onBack }) {
           <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
           <div>
             <div className="gi-serif gi-gold" style={{fontSize:22,fontWeight:700}}>Monthly Leaderboard</div>
-            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>{monthName.toUpperCase()}</div>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>{monthName.toUpperCase()}{!isCurrent && " · FINAL"}</div>
           </div>
+        </div>
+
+        {/* Month navigation */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+          <button className="gi-btn gi-btn-outline" style={{padding:"8px 14px",fontSize:13}}
+            onClick={()=>setOffset(offset-1)}>← {new Date(shiftMonth(currentMonth, offset-1)+"-15").toLocaleString("en-US",{month:"short"})}</button>
+          <div style={{fontSize:12,color:"rgba(200,168,75,.55)",letterSpacing:".06em"}}>
+            {isCurrent ? "THIS MONTH" : "PAST MONTH"}
+          </div>
+          <button className="gi-btn gi-btn-outline" style={{padding:"8px 14px",fontSize:13,
+            opacity: isCurrent ? .3 : 1, pointerEvents: isCurrent ? "none" : "auto"}}
+            onClick={()=>{ if(!isCurrent) setOffset(offset+1); }}>
+            {new Date(shiftMonth(currentMonth, offset+1)+"-15").toLocaleString("en-US",{month:"short"})} →</button>
         </div>
 
         {loading && <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:40}}>Loading…</div>}
 
         {!loading && data && (
           <>
+            {/* Your trophy / standing card */}
+            {myTrophy && (
+              <div className="gi-card" style={{padding:"16px 18px",textAlign:"center",
+                border:"1px solid rgba(200,168,75,.35)"}}>
+                <div style={{fontSize:30}}>{myTrophy.medal}</div>
+                <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,marginTop:2}}>
+                  {isCurrent ? "You're holding " : "You finished "}
+                  {myRank === 1 ? (isCurrent ? "1st" : "Champion") : myTrophy.label}
+                  {myRank > 1 && " (#" + myRank + ")"}
+                </div>
+                <div style={{fontSize:12,color:"rgba(200,180,140,.6)",marginTop:4}}>
+                  {isCurrent ? myTrophy.tier + " tier — defend it before the month ends." : myTrophy.tier + " tier, " + monthName + "."}
+                </div>
+                <button className="gi-btn gi-btn-gold" style={{marginTop:12,padding:"10px 18px"}}
+                  onClick={shareTrophy}>
+                  {copied ? "✓ COPIED!" : "📋 SHARE THIS"}
+                </button>
+              </div>
+            )}
+
             <div className="gi-card" style={{padding:"6px 0"}}>
               {data.top.length === 0 && (
                 <div style={{textAlign:"center",color:"rgba(200,180,140,.4)",padding:24,fontSize:13}}>
-                  Be the first on the board this month.
+                  {isCurrent ? "Be the first on the board this month." : "No plays recorded this month."}
                 </div>
               )}
               {data.top.map((row, i) => {
                 const isMe = profile && row.username === normalizeUsername(profile.username);
+                const trophy = monthlyTrophy(i+1);
                 return (
                   <div key={row.username} style={{
                     display:"flex",alignItems:"center",gap:14,padding:"12px 16px",
@@ -2845,8 +2960,9 @@ function LeaderboardScreen({ profile, onBack }) {
                     background: isMe ? "rgba(200,168,75,.08)" : "transparent"
                   }}>
                     <div style={{width:32,fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,
-                      color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)"}}>
-                      {i+1}
+                      color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)",
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      {trophy ? <span style={{fontSize:18}}>{trophy.medal}</span> : (i+1)}
                     </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontWeight:isMe?700:600,fontSize:14,color:isMe?"#f0dfa0":"#e8d5a0",
@@ -2883,14 +2999,14 @@ function LeaderboardScreen({ profile, onBack }) {
               })}
             </div>
 
-            {data.myRank && data.myRank > 10 && (
+            {myRank && myRank > 10 && (
               <div className="gi-card" style={{padding:"12px 16px",textAlign:"center"}}>
                 <div style={{fontSize:11,color:"rgba(200,168,75,.5)",letterSpacing:".1em",marginBottom:4}}>YOUR RANK</div>
                 <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#f0dfa0",fontWeight:700}}>
-                  #{data.myRank}
+                  #{myRank}
                 </div>
                 <div style={{fontSize:12,color:"rgba(200,180,140,.5)",marginTop:4}}>
-                  Keep your streak alive to climb.
+                  {isCurrent ? "Reach the top 10 to earn a trophy." : monthName + " final standing."}
                 </div>
               </div>
             )}
@@ -2898,7 +3014,8 @@ function LeaderboardScreen({ profile, onBack }) {
         )}
 
         <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em",marginTop:6}}>
-          Resets the 1st of every month at 12:01am ET.
+          {isCurrent ? "Resets the 1st of every month at 12:01am ET. 🥇 #1 · 🥈 top 3 · 🥉 top 10."
+                     : "Final standings for " + monthName + "."}
         </div>
       </div>
     </div>
@@ -2929,6 +3046,17 @@ function GolfIQ() {
       const logoData = await db.loadAll();
       if (Object.keys(logoData).length > 0) setLogos(logoData);
       setScreen(p ? "home" : "setup");
+      // Hydrate daily history from the cloud (cross-device truth) in the
+      // background, then merge + persist so the home-screen streak is accurate
+      // regardless of which device last played.
+      if (p && p.username) {
+        const cloud = await dailyDb.getAllPlays(p.username);
+        if (cloud && cloud.length) {
+          const merged = mergeDailyHistory(dh || [], cloud);
+          setDailyHistory(merged);
+          await S.set("gp-daily-history", merged);
+        }
+      }
     })();
   }, []);
 
