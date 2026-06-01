@@ -2024,6 +2024,13 @@ function getDayNumber(dateStr) {
   return diff + 1;  // Day 1 = epoch
 }
 
+// Human-friendly date label for the player-facing UI/share, e.g. "June 1".
+// (day_num stays internal — meaningless to players.)
+function dayLabel(dateStr) {
+  dateStr = dateStr || getETDateString();
+  return new Date(dateStr + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" });
+}
+
 // Today's course: override > sequence rotation
 function getCourseOfDay(dateStr) {
   dateStr = dateStr || getETDateString();
@@ -2201,6 +2208,24 @@ function daysBetween(dayA, dayB) {
   return Math.round((b - a) / (1000 * 60 * 60 * 24));
 }
 
+// Longest run of consecutive correct days that falls WITHIN the given month
+// (monthStr "YYYY-MM"), ending at the player's most recent correct day in that
+// month. This is what the monthly leaderboard ranks on — it resets each month,
+// so every month is a fresh race. (All-time streak is tracked separately.)
+function monthStreak(dailyHistory, monthStr) {
+  if (!dailyHistory || !dailyHistory.length) return 0;
+  const inMonth = dailyHistory
+    .filter(h => h.correct && h.day.startsWith(monthStr))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  if (!inMonth.length) return 0;
+  let best = 1, run = 1;
+  for (let i = 1; i < inMonth.length; i++) {
+    if (daysBetween(inMonth[i-1].day, inMonth[i].day) === 1) { run++; if (run > best) best = run; }
+    else run = 1;
+  }
+  return best;
+}
+
 /* ═══════════════════════════════════════════════════════
    DAILY SHARE STRING
    ───────────────────────────────────────────────────────
@@ -2209,7 +2234,7 @@ function daysBetween(dayA, dayB) {
    does that, optionally). Format intentionally short for
    group-chat sharing.
    ═══════════════════════════════════════════════════════ */
-function generateDailyShare(dayNum, timeMs, correct, streakInfo) {
+function generateDailyShare(dayStr, timeMs, correct, streakInfo) {
   const sec = (timeMs / 1000).toFixed(1);
   const emoji = correct ? "⛳" : "💨";
   const result = correct ? `got it in ${sec}s` : `missed in ${sec}s`;
@@ -2217,7 +2242,7 @@ function generateDailyShare(dayNum, timeMs, correct, streakInfo) {
   if (streakInfo.state === "active" && streakInfo.streak > 1) {
     streakBit = ` 🔥${streakInfo.streak} streak`;
   }
-  return `Golf Course IQ — Day ${dayNum}\n${emoji} ${result}${streakBit}\n\nPlay → golf-iq.app`;
+  return `Golf Course IQ — ${dayLabel(dayStr)}\n${emoji} ${result}${streakBit}\n\nPlay → golf-iq.app`;
 }
 /* ═══════════════════════════════════════════════════════
    SUPABASE — Daily Course tables and helpers
@@ -2645,14 +2670,14 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
           year, dayNum, correct, timeMs: t
         });
 
-        // Update monthly leaderboard
+        // Update monthly leaderboard — ranked on streak earned WITHIN this month
         const monthStr = dayStr.slice(0, 7);
         const monthHistory = newHistory.filter(h => h.day.startsWith(monthStr));
         const monthTimeMs = monthHistory.reduce((s, h) => s + h.timeMs, 0);
         dailyDb.upsertMonthlyStreak({
           username: profile.username,
           monthStr,
-          currentStreak: streakInfo.streak,
+          currentStreak: monthStreak(newHistory, monthStr),
           totalTimeMs: monthTimeMs,
           playsThisMonth: monthHistory.length
         });
@@ -2668,7 +2693,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
     return "idle";
   };
 
-  const shareText = result ? generateDailyShare(dayNum, result.timeMs, result.correct, result.streakInfo) : "";
+  const shareText = result ? generateDailyShare(dayStr, result.timeMs, result.correct, result.streakInfo) : "";
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(shareText); setCopied(true); setTimeout(()=>setCopied(false), 2200); }
@@ -2715,7 +2740,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
             <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
-              <div className="gi-serif gi-gold" style={{fontSize:20,fontWeight:700,lineHeight:1}}>Day {dayNum}</div>
+              <div className="gi-serif gi-gold" style={{fontSize:20,fontWeight:700,lineHeight:1}}>{dayLabel(dayStr)}</div>
             </div>
             <div className={`gi-timer ${isOver6s?"gi-timer-fast":""}`} style={{fontSize:20}}>{fmtFull(elapsed)}</div>
           </div>
@@ -2762,7 +2787,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
           <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
-            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,lineHeight:1}}>Day {dayNum}</div>
+            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,lineHeight:1}}>{dayLabel(dayStr)}</div>
           </div>
         </div>
 
@@ -3080,10 +3105,9 @@ function GolfIQ() {
         const monthStr = getETDateString().slice(0, 7);
         const monthHistory = merged.filter(h => h.day.startsWith(monthStr));
         if (monthHistory.length) {
-          const sInfo = computeStreak(merged, getETDateString());
           await dailyDb.upsertMonthlyStreak({
             username: p.username, monthStr,
-            currentStreak: sInfo.streak,
+            currentStreak: monthStreak(merged, monthStr),
             totalTimeMs: monthHistory.reduce((s, h) => s + h.timeMs, 0),
             playsThisMonth: monthHistory.length
           });
