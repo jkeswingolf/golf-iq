@@ -2887,7 +2887,13 @@ function shiftMonth(monthStr, delta) {
   return d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0");
 }
 
-function LeaderboardScreen({ profile, onBack }) {
+// Last calendar day (YYYY-MM-DD) of an ET "YYYY-MM" month.
+function lastDayOfMonth(monthStr) {
+  const y = parseInt(monthStr.slice(0,4),10), mo = parseInt(monthStr.slice(5,7),10);
+  return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0,10);
+}
+
+function LeaderboardScreen({ profile, onBack, logos }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0); // 0 = current month, -1 = last month, ...
@@ -2904,7 +2910,7 @@ function LeaderboardScreen({ profile, onBack }) {
       setLoading(true);
       const d = await dailyDb.getMonthlyLeaderboard(monthStr, profile && profile.username, 10);
       const usernames = d.top.map(function(r){ return r.username; });
-      const recentPlays = await dailyDb.getRecentPlaysForUsers(usernames, 3);
+      const recentPlays = await dailyDb.getRecentPlaysForUsers(usernames, 8);
       if (!cancelled) { setData(Object.assign({}, d, { recentPlays })); setLoading(false); }
     })();
     return () => { cancelled = true; };
@@ -2917,6 +2923,18 @@ function LeaderboardScreen({ profile, onBack }) {
     if (idx >= 0) myRank = idx + 1;
   }
   const myTrophy = monthlyTrophy(myRank);
+
+  // Build the shared 5-day column window (oldest -> newest). Current month ends
+  // today; a past month ends on that month's last day.
+  const today = getETDateString();
+  const windowEnd = isCurrent ? today : lastDayOfMonth(monthStr);
+  const dayCols = [];
+  const _endD = new Date(windowEnd + "T12:00:00Z");
+  for (let i = 4; i >= 0; i--) { const d = new Date(_endD); d.setUTCDate(_endD.getUTCDate() - i); dayCols.push(d.toISOString().slice(0,10)); }
+  // Today's crest IS the live puzzle — keep it locked until the viewer has played.
+  const meKey = profile ? normalizeUsername(profile.username) : null;
+  const myPlays = (data && data.recentPlays && meKey && data.recentPlays[meKey]) || [];
+  const playedToday = myPlays.some(function(p){ return p.day_str === today; });
 
   const shareTrophy = async () => {
     if (!myTrophy) return;
@@ -2989,57 +3007,67 @@ function LeaderboardScreen({ profile, onBack }) {
                   {isCurrent ? "Be the first on the board this month." : "No plays recorded this month."}
                 </div>
               )}
+              {data.top.length > 0 && (
+                <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6,padding:"4px 12px 10px",borderBottom:"1px solid rgba(200,168,75,.10)"}}>
+                  {dayCols.map(function(ds){
+                    const c = getCourseOfDay(ds);
+                    const isToday = ds === today;
+                    const lock = isToday && !playedToday;
+                    const lbl = isToday ? "Today" : new Date(ds + "T12:00:00Z").toLocaleDateString("en-US",{weekday:"short"});
+                    return (
+                      <div key={ds} style={{textAlign:"center"}}>
+                        <div style={{height:34,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}>
+                          {(lock || !c)
+                            ? <div style={{width:30,height:30,borderRadius:"50%",border:"1px solid rgba(200,168,75,.3)",color:"rgba(200,168,75,.55)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>?</div>
+                            : <CourseLogo course={c} size={30} uploadedData={logos && logos[c.id]}/>}
+                        </div>
+                        <div style={{fontSize:10,color:isToday?"#c8a84b":"rgba(200,180,140,.5)"}}>{lbl}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {data.top.map((row, i) => {
                 const isMe = profile && row.username === normalizeUsername(profile.username);
                 const trophy = monthlyTrophy(i+1);
+                const byDate = {};
+                ((data.recentPlays && data.recentPlays[row.username]) || []).forEach(function(p){ byDate[p.day_str] = p; });
+                const avgMs = row.plays_this_month ? row.total_time_ms / row.plays_this_month : 0;
                 return (
                   <div key={row.username} style={{
-                    display:"flex",alignItems:"center",gap:14,padding:"12px 16px",
+                    padding:"11px 12px 9px",
                     borderBottom: i<data.top.length-1 ? "1px solid rgba(200,168,75,.08)" : "none",
                     background: isMe ? "rgba(200,168,75,.08)" : "transparent"
                   }}>
-                    <div style={{width:32,fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,
-                      color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)",
-                      display:"flex",alignItems:"center",justifyContent:"center"}}>
-                      {trophy ? <span style={{fontSize:18}}>{trophy.medal}</span> : (i+1)}
-                    </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:isMe?700:600,fontSize:14,color:isMe?"#f0dfa0":"#e8d5a0",
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        @{row.display_name || row.username} {isMe && <span style={{fontSize:10,opacity:.7}}>(you)</span>}
-                        {row.all_time_streak > row.current_streak && (
-                          <span title="All-time streak" style={{fontSize:10,color:"rgba(200,168,75,.55)",marginLeft:6,fontWeight:500}}>
-                            ⭐{row.all_time_streak} all-time
-                          </span>
-                        )}
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                      <div style={{width:24,fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,
+                        color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)",textAlign:"center"}}>
+                        {trophy ? <span style={{fontSize:16}}>{trophy.medal}</span> : (i+1)}
                       </div>
-                     <div style={{fontSize:11,color:"rgba(200,180,140,.5)",marginTop:2}}>
-                        {row.plays_this_month} {row.plays_this_month === 1 ? "play" : "plays"}
-                      </div>
-                      {data.recentPlays && data.recentPlays[row.username] && (
-                        <div style={{fontSize:10,color:"rgba(200,168,75,.55)",marginTop:4,letterSpacing:".03em"}}>
-                          {data.recentPlays[row.username].map(function(p, idx) {
-                            const dayLabel = new Date(p.day_str + "T12:00:00Z").toLocaleDateString("en-US",{weekday:"short"});
-                            const timeS = (p.time_ms/1000).toFixed(1) + "s";
-                            return (
-                              <span key={p.day_str} style={{marginRight:8}}>
-                                {dayLabel} {p.correct ? "⛳" : "💨"} {timeS}
-                              </span>
-                            );
-                          })}
+                      <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+                        <div style={{fontWeight:isMe?700:600,fontSize:14,color:isMe?"#f0dfa0":"#e8d5a0",
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          @{row.display_name || row.username} {isMe && <span style={{fontSize:10,opacity:.7}}>(you)</span>}
+                          {row.all_time_streak > row.current_streak && (
+                            <span title="All-time streak" style={{fontSize:10,color:"rgba(200,168,75,.55)",marginLeft:6,fontWeight:500}}>⭐{row.all_time_streak} all-time</span>
+                          )}
                         </div>
-                      )}
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:3,fontFamily:"'Playfair Display',serif",fontSize:18,color:"#f0dfa0"}}>🔥{row.current_streak}</div>
+                      <div style={{textAlign:"right",minWidth:52}}>
+                        <div style={{fontSize:11,color:"#e8d5a0"}}>avg {(avgMs/1000).toFixed(1)}s</div>
+                        <div style={{fontSize:9,color:"rgba(200,168,75,.4)"}}>{row.plays_this_month} {row.plays_this_month === 1 ? "play" : "plays"}</div>
+                      </div>
                     </div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#f0dfa0"}}>
-                        🔥{row.current_streak}
-                      </div>
-                      <div style={{fontSize:9,color:"rgba(200,168,75,.4)",letterSpacing:".08em"}}>
-                        THIS MONTH
-                      </div>
-                      <div style={{fontSize:10,color:"rgba(200,168,75,.35)",marginTop:2}}>
-                        {fmtFull(row.total_time_ms)}
-                      </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6}}>
+                      {dayCols.map(function(ds){
+                        const p = byDate[ds];
+                        if (!p) return <div key={ds} style={{textAlign:"center",fontSize:13,color:"rgba(200,168,75,.18)"}}>·</div>;
+                        const t = (p.time_ms/1000).toFixed(1) + "s";
+                        return p.correct
+                          ? <div key={ds} style={{textAlign:"center",fontSize:13,color:"#e8d5a0",fontWeight:600}}>{t}</div>
+                          : <div key={ds} style={{textAlign:"center",fontSize:11,color:"#d98a6a"}}>💨{t}</div>;
+                      })}
                     </div>
                   </div>
                 );
@@ -3234,7 +3262,7 @@ function GolfIQ() {
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
       {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
       {screen === "daily"       && <DailyScreen profile={profile} logos={logos} dailyHistory={dailyHistory} onComplete={onDailyComplete} onBack={()=>setScreen("home")} onViewLeaderboard={()=>setScreen("leaderboard")} onSaveEmail={saveEmail} onDismissEmail={dismissEmailPrompt}/>}
-      {screen === "leaderboard" && <LeaderboardScreen profile={profile} onBack={()=>setScreen("daily")}/>}
+      {screen === "leaderboard" && <LeaderboardScreen profile={profile} logos={logos} onBack={()=>setScreen("daily")}/>}
       {screen === "admin"    && <AdminScreen logos={logos} onSaveLogo={saveLogo} onRemoveLogo={removeLogo} onBack={()=>setScreen("home")}/>}
     </>
   );
