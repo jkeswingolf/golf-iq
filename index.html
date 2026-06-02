@@ -2931,6 +2931,10 @@ function LeaderboardScreen({ profile, onBack, logos }) {
   const dayCols = [];
   const _endD = new Date(windowEnd + "T12:00:00Z");
   for (let i = 4; i >= 0; i--) { const d = new Date(_endD); d.setUTCDate(_endD.getUTCDate() - i); dayCols.push(d.toISOString().slice(0,10)); }
+  // Columns before this index fall in the PREVIOUS month — dimmed, with a divider
+  // marking where the scored month begins (stats only count this-month days).
+  const firstInMonthIdx = dayCols.findIndex(function(ds){ return ds.slice(0,7) === monthStr; });
+  const hasPrevMonth = firstInMonthIdx > 0;
   // Today's crest IS the live puzzle — keep it locked until the viewer has played.
   const meKey = profile ? normalizeUsername(profile.username) : null;
   const myPlays = (data && data.recentPlays && meKey && data.recentPlays[meKey]) || [];
@@ -3009,19 +3013,22 @@ function LeaderboardScreen({ profile, onBack, logos }) {
               )}
               {data.top.length > 0 && (
                 <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6,padding:"4px 12px 10px",borderBottom:"1px solid rgba(200,168,75,.10)"}}>
-                  {dayCols.map(function(ds){
+                  {dayCols.map(function(ds, ci){
                     const c = getCourseOfDay(ds);
                     const isToday = ds === today;
                     const lock = isToday && !playedToday;
+                    const out = ci < firstInMonthIdx;
+                    const divider = hasPrevMonth && ci === firstInMonthIdx;
                     const lbl = isToday ? "Today" : new Date(ds + "T12:00:00Z").toLocaleDateString("en-US",{weekday:"short"});
                     return (
-                      <div key={ds} style={{textAlign:"center"}}>
+                      <div key={ds} style={{textAlign:"center",opacity:out?0.5:1,borderLeft:divider?"1px solid rgba(240,208,96,.4)":"none"}}>
                         <div style={{height:34,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}>
                           {(lock || !c)
                             ? <div style={{width:30,height:30,borderRadius:"50%",border:"1px solid rgba(200,168,75,.3)",color:"rgba(200,168,75,.55)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>?</div>
                             : <CourseLogo course={c} size={30} uploadedData={logos && logos[c.id]}/>}
                         </div>
                         <div style={{fontSize:10,color:isToday?"#c8a84b":"rgba(200,180,140,.5)"}}>{lbl}</div>
+                        <div style={{height:11,fontSize:8,letterSpacing:".03em",color:"#f0d060",marginTop:1}}>{divider ? "this month" : ""}</div>
                       </div>
                     );
                   })}
@@ -3060,13 +3067,16 @@ function LeaderboardScreen({ profile, onBack, logos }) {
                       </div>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6}}>
-                      {dayCols.map(function(ds){
+                      {dayCols.map(function(ds, ci){
+                        const out = ci < firstInMonthIdx;
+                        const divider = hasPrevMonth && ci === firstInMonthIdx;
+                        const base = {textAlign:"center",borderLeft:divider?"1px solid rgba(240,208,96,.4)":"none"};
                         const p = byDate[ds];
-                        if (!p) return <div key={ds} style={{textAlign:"center",fontSize:13,color:"rgba(200,168,75,.18)"}}>·</div>;
+                        if (!p) return <div key={ds} style={Object.assign({fontSize:13,color:"rgba(200,168,75,.18)"},base)}>·</div>;
                         const t = (p.time_ms/1000).toFixed(1) + "s";
                         return p.correct
-                          ? <div key={ds} style={{textAlign:"center",fontSize:13,color:"#e8d5a0",fontWeight:600}}>{t}</div>
-                          : <div key={ds} style={{textAlign:"center",fontSize:11,color:"#d98a6a"}}>💨{t}</div>;
+                          ? <div key={ds} style={Object.assign({fontSize:13,fontWeight:600,color:out?"rgba(232,213,160,.45)":"#e8d5a0"},base)}>{t}</div>
+                          : <div key={ds} style={Object.assign({fontSize:11,color:out?"rgba(217,138,106,.5)":"#d98a6a"},base)}>💨{t}</div>;
                       })}
                     </div>
                   </div>
