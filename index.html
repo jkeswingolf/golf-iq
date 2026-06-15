@@ -483,6 +483,26 @@ html, body { height: 100%; }
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const ALL_COURSES = [
 
@@ -1760,6 +1780,17 @@ function FriendBattleHub({ profile, logos, onBack }) {
     </div>
   );
 
+  if (phase === "h2h") return (
+    <HeadToHeadHub profile={profile} logos={logos} onBack={() => setPhase("ready")}/>
+  );
+
+  if (phase === "club") return (
+    <SprintResultScreen profile={profile} result={{
+      answers:[], totalMs:0, penaltyMs:0, adjustedMs:0,
+      correctCount:0, courseIds:[], dateStr
+    }} logos={logos} onBack={() => setPhase("ready")} onPlayAgain={() => setPhase("playing")} clubOnly={true}/>
+  );
+
   if (phase === "playing") return (
     <SprintScreen profile={profile} logos={logos}
       onComplete={handleComplete} onBack={() => setPhase("ready")}/>
@@ -1783,8 +1814,578 @@ function FriendBattleHub({ profile, logos, onBack }) {
     );
   }
 
-  // ── READY — pre-play hub ──
+  // ── READY — Pick Your Competition hub ──
   const courses = getSprintCourses(dateStr);
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",
+        maxWidth:480,margin:"0 auto",width:"100%",padding:"24px 16px",gap:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+        </div>
+
+        <div style={{textAlign:"center",padding:"12px 0 4px"}}>
+          <div style={{fontSize:38,marginBottom:6}}>⚡</div>
+          <div className="gi-serif gi-gold" style={{fontSize:32,fontWeight:900,lineHeight:1.05}}>Friend Battle</div>
+          <div style={{color:"rgba(200,180,140,.45)",fontSize:13,marginTop:6,letterSpacing:".08em"}}>
+            PICK YOUR COMPETITION
+          </div>
+        </div>
+
+        {/* Head-to-Head */}
+        <div className="gi-card" style={{padding:"20px",cursor:"pointer",
+          border:"1.5px solid rgba(200,168,75,.35)",transition:"all .2s"}}
+          onClick={() => setPhase("h2h")}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:32,flexShrink:0}}>🤺</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#f0dfa0",marginBottom:3}}>Head-to-Head</div>
+              <div style={{fontSize:12,color:"rgba(200,180,140,.65)",lineHeight:1.45}}>
+                Play 5 courses. Send the link. They play the same 5.<br/>
+                Score stays hidden until they finish.
+              </div>
+            </div>
+            <div style={{fontSize:18,color:"rgba(200,168,75,.4)"}}>→</div>
+          </div>
+        </div>
+
+        {/* Sprint / The Field */}
+        <div className="gi-card" style={{padding:"20px",cursor:"pointer",
+          border:"1.5px solid rgba(200,168,75,.35)",transition:"all .2s",
+          opacity: todayResult ? 0.65 : 1}}
+          onClick={() => !todayResult && setPhase("playing")}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:32,flexShrink:0}}>⚡</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#f0dfa0",marginBottom:3}}>
+                The Sprint {todayResult ? "✓" : ""}
+              </div>
+              <div style={{fontSize:12,color:"rgba(200,180,140,.65)",lineHeight:1.45}}>
+                {todayResult
+                  ? `Done — you posted ${(todayResult.adjusted_ms/1000).toFixed(1)}s today.`
+                  : "7 courses. Wrong answers add 10 seconds. Compete against The Field."}
+              </div>
+            </div>
+            <div style={{fontSize:18,color:"rgba(200,168,75,.4)"}}>→</div>
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+            {courses.slice(0,7).map(c => (
+              <div key={c.id} style={{width:32,height:32,borderRadius:"50%",
+                border:"1px solid rgba(200,168,75,.25)",overflow:"hidden",
+                background:"white",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <CourseLogo course={c} size={32} uploadedData={logos && logos[c.id]}/>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Club */}
+        <div className="gi-card" style={{padding:"20px",cursor:"pointer",
+          border:"1.5px solid rgba(200,168,75,.35)",transition:"all .2s"}}
+          onClick={() => setPhase("club")}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:32,flexShrink:0}}>🏌️</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#f0dfa0",marginBottom:3}}>Your Club</div>
+              <div style={{fontSize:12,color:"rgba(200,180,140,.65)",lineHeight:1.45}}>
+                Persistent group rivalry. Sprint standings for your crew.<br/>
+                Share a Club Code to invite anyone.
+              </div>
+            </div>
+            <div style={{fontSize:18,color:"rgba(200,168,75,.4)"}}>→</div>
+          </div>
+        </div>
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.3)",letterSpacing:".06em"}}>
+          Sprint resets at midnight ET · Head-to-Head anytime
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   HEAD-TO-HEAD CHALLENGE GAME — 5 courses, seeded
+   Used by both challenger (new seed) and opponent (from link)
+═══════════════════════════════════════════════════════ */
+function ChallengeGameScreen({ profile, logos, seed, isOpponent, challengerData, onComplete, onBack }) {
+  const courses  = getChallengeCourses(seed);
+  const label    = challengeLabel(seed);
+  const dateStr  = getETDateString();
+
+  const [qIdx, setQIdx]         = useState(0);
+  const [answers, setAnswers]   = useState([]);
+  const [phase, setPhase]       = useState("idle");
+  const [selectedOpt, setSel]   = useState(null);
+  const [elapsed, setElapsed]   = useState(0);
+  const [totalMs, setTotalMs]   = useState(0);
+  const qStart  = useRef(Date.now());
+  const timerRef = useRef(null);
+
+  const q = courses[qIdx];
+  const optsData = React.useMemo(() => {
+    if (!q) return null;
+    return getDailyOptions(q, seed + "-h2h-" + qIdx);
+  }, [qIdx]);
+
+  useEffect(() => {
+    qStart.current = Date.now();
+    setElapsed(0);
+    timerRef.current = setInterval(() => setElapsed(Date.now() - qStart.current), 87);
+    return () => clearInterval(timerRef.current);
+  }, [qIdx]);
+
+  const choose = (optIdx) => {
+    if (phase !== "idle" || !optsData) return;
+    clearInterval(timerRef.current);
+    const t = Date.now() - qStart.current;
+    const correct = optIdx === optsData.ansIdx;
+    setSel(optIdx);
+    setPhase("sel");
+    correct ? playClick() : playWrong();
+
+    setTimeout(() => {
+      const newAnswers = [...answers, { correct, picked: optIdx, timeMs: t, course: q, optsData }];
+      const newTotal = totalMs + t;
+      setAnswers(newAnswers);
+      setTotalMs(newTotal);
+
+      if (qIdx < courses.length - 1) {
+        setQIdx(i => i + 1);
+        setSel(null);
+        setPhase("idle");
+      } else {
+        const correctCount = newAnswers.filter(a => a.correct).length;
+        onComplete({ answers: newAnswers, totalMs: newTotal, correctCount, seed, courses, isOpponent, challengerData });
+      }
+    }, 350);
+  };
+
+  const optState = (i) => {
+    if (phase === "idle") return "idle";
+    if (phase === "sel")  return i === selectedOpt ? "sel" : "idle";
+    return "idle";
+  };
+
+  const isOver6s = elapsed > 6000;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",
+        maxWidth:520,margin:"0 auto",width:"100%",padding:"18px 16px",gap:14}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>
+              HEAD-TO-HEAD
+            </div>
+            <div style={{fontSize:12,color:"rgba(200,168,75,.4)"}}>
+              {isOpponent ? "vs @" + (challengerData && challengerData.challenger_display) : label}
+            </div>
+          </div>
+          <div className={`gi-timer ${isOver6s ? "gi-timer-fast" : ""}`} style={{fontSize:20}}>
+            {fmtFull(elapsed)}
+          </div>
+        </div>
+
+        {/* Progress dots */}
+        <div style={{display:"flex",gap:6,justifyContent:"center"}}>
+          {courses.map((_, i) => (
+            <div key={i} className={`gi-dot ${
+              i < qIdx ? (answers[i] && answers[i].correct ? "gi-dot-correct" : "gi-dot-wrong")
+              : i === qIdx ? "gi-dot-active" : ""
+            }`}/>
+          ))}
+        </div>
+
+        {/* Logo */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",
+          padding:"16px 0",position:"relative",flex:1,justifyContent:"center"}}>
+          <div className="gi-spotlight" style={{width:260,height:260}}/>
+          <div className="gi-logo-ring" style={{width:156,height:156,position:"relative",zIndex:1}}>
+            <CourseLogo course={q} size={156} uploadedData={logos && logos[q.id]}/>
+          </div>
+          <div style={{marginTop:14,textAlign:"center",position:"relative",zIndex:1}}>
+            <div style={{fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+              {qIdx + 1} OF 5 · NO DO-OVERS
+            </div>
+          </div>
+        </div>
+
+        {/* Options */}
+        {optsData && (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {optsData.opts.map((opt, i) => (
+              <OptBtn key={opt.id} letter={"ABCD"[i]} option={opt}
+                state={optState(i)} onClick={() => choose(i)} disabled={phase !== "idle"}/>
+            ))}
+          </div>
+        )}
+
+        <div style={{textAlign:"center",fontSize:12,color:"rgba(200,168,75,.3)",letterSpacing:".08em"}}>
+          ⏱ TOTAL: {fmtFull(totalMs + elapsed)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   CHALLENGE RESULT SCREEN — reveal + share
+═══════════════════════════════════════════════════════ */
+function ChallengeResultScreen({ profile, result, logos, onBack, onRematch }) {
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(true);
+
+  const { answers, totalMs, correctCount, seed, courses, isOpponent, challengerData } = result;
+  const label = challengeLabel(seed);
+
+  // Hole-by-hole match play result (opponent vs challenger)
+  // For challenger: we don't have opponent data yet — show pending
+  // For opponent: we have both sets, show full result
+  const myCorrect    = correctCount;
+  const myTime       = totalMs;
+  const theirCorrect = isOpponent ? (challengerData && challengerData.challenger_correct) : null;
+  const theirTime    = isOpponent ? (challengerData && challengerData.challenger_time_ms) : null;
+  const theirName    = isOpponent
+    ? (challengerData && challengerData.challenger_display)
+    : null;
+
+  // Match play: count holes won by each side
+  let myHoles = 0, theirHoles = 0;
+  if (isOpponent && answers.length === 5) {
+    answers.forEach((a, i) => {
+      // We don't have hole-by-hole challenger data — use overall correct/time
+      // Simplified: correct = win hole, wrong = lose hole, both wrong = halve
+      // Full hole-by-hole would require storing per-hole challenger data (future)
+      if (a.correct) myHoles++;
+    });
+    // challenger holes won = their correct count
+    theirHoles = theirCorrect || 0;
+    // Adjust for shared wrong answers (halved holes) — simplified
+    const shared = Math.min(myHoles, theirHoles);
+    // Net: just use correct counts as proxy for now
+  }
+
+  const matchResult = isOpponent && theirCorrect !== null ? (() => {
+    if (myCorrect > theirCorrect) return { winner: "you", margin: myCorrect - theirCorrect };
+    if (theirCorrect > myCorrect) return { winner: "them", margin: theirCorrect - myCorrect };
+    // Tied on correct — time decides
+    if (myTime < theirTime) return { winner: "you", margin: 0, tiebreak: true };
+    if (theirTime < myTime) return { winner: "them", margin: 0, tiebreak: true };
+    return { winner: "tie" };
+  })() : null;
+
+  // Save result on mount
+  useEffect(() => {
+    (async () => {
+      if (!profile) { setSaving(false); return; }
+      if (isOpponent) {
+        await challengeDb.completeChallenge({
+          seed, username: profile.username,
+          correctCount, timeMs: totalMs
+        });
+      } else {
+        await challengeDb.createChallenge({
+          seed, username: profile.username,
+          correctCount, timeMs: totalMs,
+          courseIds: courses.map(c => c.id)
+        });
+      }
+      setSaving(false);
+    })();
+  }, []);
+
+  // Share strings
+  const challengeUrl = "https://golf-iq.app?c=" + seed;
+  const myTimeSec = (totalMs / 1000).toFixed(1);
+
+  const challengerShareText = saving ? "" :
+    `Golf IQ Head-to-Head ⚡ Challenge #${label}
+` +
+    `I scored ${correctCount}/5 in ${myTimeSec}s
+
+` +
+    `Can you beat me? Your turn →
+${challengeUrl}`;
+
+  const opponentShareText = !matchResult ? "" : matchResult.winner === "you"
+    ? `Golf IQ Head-to-Head ⚡
+I beat @${theirName} ${correctCount}-${theirCorrect}${matchResult.tiebreak ? " on time" : ""}
+Challenge #${label}
+https://golf-iq.app`
+    : matchResult.winner === "them"
+    ? `Golf IQ Head-to-Head ⚡
+@${theirName} beat me ${theirCorrect}-${myCorrect}${matchResult.tiebreak ? " on time" : ""} — rematch coming
+Challenge #${label}
+https://golf-iq.app`
+    : `Golf IQ Head-to-Head ⚡
+All square with @${theirName} — ${myCorrect}/5 each
+Challenge #${label}
+https://golf-iq.app`;
+
+  const shareText = isOpponent ? opponentShareText : challengerShareText;
+
+  const resultHeadline = () => {
+    if (!isOpponent) return saving ? "Saving…" : "Challenge sent!";
+    if (!matchResult) return "Result pending";
+    if (matchResult.winner === "you") return matchResult.tiebreak ? "⚡ You win on time!" : `🏆 You win ${myCorrect}-${theirCorrect}`;
+    if (matchResult.winner === "them") return matchResult.tiebreak ? "💨 Lost on time" : `💨 Beaten ${theirCorrect}-${myCorrect}`;
+    return "🤝 All Square";
+  };
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",paddingBottom:90}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:480,margin:"0 auto",padding:"20px 16px",
+        display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>
+              HEAD-TO-HEAD
+            </div>
+            <div style={{fontSize:13,color:"rgba(200,168,75,.6)"}}>{label}</div>
+          </div>
+          <div style={{width:60}}/>
+        </div>
+
+        {/* Result hero */}
+        <div className="gi-card" style={{padding:"24px 20px",textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:700,color:"#f0dfa0",fontFamily:"'Playfair Display',serif",
+            marginBottom:6}}>{resultHeadline()}</div>
+
+          {/* Score comparison */}
+          {isOpponent && matchResult ? (
+            <div style={{display:"flex",alignItems:"center",gap:0,justifyContent:"center",
+              marginTop:14,paddingTop:14,borderTop:"1px solid rgba(200,168,75,.15)"}}>
+              <div style={{flex:1,textAlign:"center"}}>
+                <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginBottom:4}}>YOU</div>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,fontWeight:900,
+                  color: matchResult.winner==="you"?"#f0dfa0":"rgba(200,168,75,.5)"}}>
+                  {myCorrect}
+                </div>
+                <div style={{fontSize:12,color:"rgba(200,168,75,.5)",marginTop:2}}>{myTimeSec}s</div>
+              </div>
+              <div style={{fontSize:22,color:"rgba(200,168,75,.3)",padding:"0 8px"}}>vs</div>
+              <div style={{flex:1,textAlign:"center"}}>
+                <div style={{fontSize:11,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginBottom:4}}>
+                  @{theirName}
+                </div>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,fontWeight:900,
+                  color: matchResult.winner==="them"?"#f0dfa0":"rgba(200,168,75,.5)"}}>
+                  {theirCorrect}
+                </div>
+                <div style={{fontSize:12,color:"rgba(200,168,75,.5)",marginTop:2}}>
+                  {((theirTime||0)/1000).toFixed(1)}s
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid rgba(200,168,75,.15)"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:48,fontWeight:900}}>
+                <span className="gi-gold">{correctCount}</span>
+                <span style={{color:"rgba(200,168,75,.3)",fontSize:28}}>/5</span>
+              </div>
+              <div style={{fontSize:13,color:"rgba(200,180,140,.6)",marginTop:4}}>{myTimeSec}s</div>
+              {!isOpponent && !saving && (
+                <div style={{marginTop:14,padding:"12px 16px",background:"rgba(200,168,75,.08)",
+                  borderRadius:8,fontSize:13,color:"rgba(200,180,140,.75)",lineHeight:1.5}}>
+                  Share the link below with your opponent.<br/>
+                  They'll play the same 5 courses and see your score after.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Scorecard */}
+        {answers && answers.length > 0 && (
+          <div className="gi-card" style={{padding:"14px"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",
+              fontWeight:700,marginBottom:10}}>YOUR SCORECARD</div>
+            {answers.map((a, i) => (
+              <div key={i} className={`gi-result-row ${a.correct ? "gi-result-correct" : "gi-result-wrong"}`}
+                style={{marginBottom: i < answers.length - 1 ? 7 : 0}}>
+                <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,fontSize:16,
+                  background:a.correct?"rgba(40,200,90,.15)":"rgba(200,40,40,.15)",
+                  border:"1.5px solid "+(a.correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"),
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {a.course.sym}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {a.course.name}
+                  </div>
+                  {!a.correct && a.optsData && (
+                    <div style={{fontSize:11,color:"rgba(255,140,140,.6)",marginTop:1}}>
+                      You picked: {a.optsData.opts[a.picked] && a.optsData.opts[a.picked].name}
+                    </div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:12,color:"rgba(200,168,75,.55)"}}>{fmtFull(a.timeMs)}</div>
+                  <div style={{fontSize:15}}>{a.correct ? "✅" : "❌"}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {onRematch && isOpponent && (
+          <button className="gi-btn gi-btn-outline" style={{width:"100%",padding:"12px",fontSize:14}}
+            onClick={onRematch}>
+            ⚡ SEND A REMATCH
+          </button>
+        )}
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+          {label}
+        </div>
+      </div>
+
+      {/* Sticky footer */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,
+        background:"linear-gradient(to top, rgba(7,13,31,1) 60%, rgba(7,13,31,0))",
+        padding:"16px 20px 20px",display:"flex",gap:10,zIndex:10}}>
+        <button className="gi-btn gi-btn-outline" style={{flex:1,maxWidth:160,padding:"13px",fontSize:13}}
+          onClick={onBack}>← HOME</button>
+        <button className="gi-btn gi-btn-gold"
+          style={{flex:2,maxWidth:280,fontSize:14,padding:"14px",
+            opacity: saving || !shareText ? 0.5 : 1}}
+          disabled={saving || !shareText}
+          onClick={async () => {
+            try { await navigator.clipboard.writeText(shareText); setCopied(true); setTimeout(()=>setCopied(false),2200); }
+            catch(e) { alert(shareText); }
+          }}>
+          {saving ? "Saving…" : copied ? "✓ COPIED!" : isOpponent ? "📋 SHARE RESULT" : "📋 COPY CHALLENGE LINK"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   HEAD-TO-HEAD HUB — entry point for 1v1 challenge
+═══════════════════════════════════════════════════════ */
+function HeadToHeadHub({ profile, logos, incomingSeed, onBack }) {
+  const [phase, setPhase]   = useState(incomingSeed ? "opponent-ready" : "ready");
+  const [seed, setSeed]     = useState(incomingSeed || newChallengeSeed());
+  const [result, setResult] = useState(null);
+  const [challengerData, setChallengerData] = useState(null);
+  const [loading, setLoading] = useState(!!incomingSeed);
+
+  useEffect(() => {
+    if (!incomingSeed) return;
+    (async () => {
+      const ch = await challengeDb.getChallenge(incomingSeed);
+      if (ch) { setChallengerData(ch); setLoading(false); setPhase("opponent-ready"); }
+      else { setLoading(false); setPhase("invalid"); }
+    })();
+  }, [incomingSeed]);
+
+  const handleComplete = (res) => {
+    setResult(res);
+    setPhase("result");
+  };
+
+  const handleRematch = () => {
+    setSeed(newChallengeSeed());
+    setResult(null);
+    setChallengerData(null);
+    setPhase("ready");
+  };
+
+  if (loading) return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div style={{fontSize:14,color:"rgba(200,168,75,.4)",letterSpacing:".2em"}}>LOADING CHALLENGE…</div>
+    </div>
+  );
+
+  if (phase === "invalid") return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:400,padding:"32px 24px",textAlign:"center"}}>
+        <div style={{fontSize:42,marginBottom:12}}>🏌️</div>
+        <div className="gi-serif gi-gold" style={{fontSize:24,fontWeight:900}}>Challenge not found</div>
+        <div style={{color:"rgba(200,180,140,.6)",fontSize:14,marginTop:10}}>
+          This challenge link may have expired or the code is incorrect.
+        </div>
+        <button className="gi-btn gi-btn-outline" onClick={onBack} style={{marginTop:24}}>← BACK</button>
+      </div>
+    </div>
+  );
+
+  if (phase === "playing" || phase === "opponent-playing") return (
+    <ChallengeGameScreen
+      profile={profile} logos={logos} seed={seed}
+      isOpponent={phase === "opponent-playing"}
+      challengerData={challengerData}
+      onComplete={handleComplete}
+      onBack={() => setPhase(incomingSeed ? "opponent-ready" : "ready")}/>
+  );
+
+  if (phase === "result") return (
+    <ChallengeResultScreen
+      profile={profile} result={result} logos={logos}
+      onBack={onBack} onRematch={handleRematch}/>
+  );
+
+  // ── Opponent ready screen ──
+  if (phase === "opponent-ready" && challengerData) {
+    const courses = getChallengeCourses(seed);
+    return (
+      <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+        <div className="gi-stars"/>
+        <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",
+          maxWidth:480,margin:"0 auto",width:"100%",padding:"24px 16px",gap:18,textAlign:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+          </div>
+          <div style={{padding:"20px 0"}}>
+            <div style={{fontSize:38,marginBottom:8}}>⚡</div>
+            <div className="gi-serif gi-gold" style={{fontSize:28,fontWeight:900}}>
+              @{challengerData.challenger_display} challenges you
+            </div>
+            <div style={{color:"rgba(200,180,140,.55)",fontSize:14,marginTop:8,lineHeight:1.5}}>
+              They scored <b style={{color:"#f0dfa0"}}>{challengerData.challenger_correct}/5</b> on {challengeLabel(seed)}.<br/>
+              Same 5 courses. Can you beat them?
+            </div>
+          </div>
+
+          {/* Course preview */}
+          <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+            {courses.map((c) => (
+              <div key={c.id} style={{width:44,height:44,borderRadius:"50%",
+                border:"1.5px solid rgba(200,168,75,.3)",overflow:"hidden",
+                background:"white",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <CourseLogo course={c} size={44} uploadedData={logos && logos[c.id]}/>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+            IDENTICAL 5 COURSES — YOUR RESULT REVEALED AFTER
+          </div>
+
+          <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:18,padding:"18px"}}
+            onClick={() => setPhase("opponent-playing")}>
+            ⚡ ACCEPT CHALLENGE
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Challenger ready screen ──
+  const courses = getChallengeCourses(seed);
   return (
     <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <div className="gi-stars"/>
@@ -1793,18 +2394,21 @@ function FriendBattleHub({ profile, logos, onBack }) {
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
         </div>
-        <div style={{textAlign:"center",padding:"20px 0"}}>
-          <div style={{fontSize:42,marginBottom:8}}>⚡</div>
-          <div className="gi-serif gi-gold" style={{fontSize:36,fontWeight:900,lineHeight:1.05}}>Friend Battle</div>
+        <div style={{textAlign:"center",padding:"16px 0"}}>
+          <div style={{fontSize:38,marginBottom:8}}>⚡</div>
+          <div className="gi-serif gi-gold" style={{fontSize:32,fontWeight:900,lineHeight:1.05}}>
+            Head-to-Head
+          </div>
           <div style={{color:"rgba(200,180,140,.55)",fontSize:14,marginTop:8,lineHeight:1.5}}>
-            7 logos. One shot. Wrong answers add 10 seconds.<br/>
-            Same courses for everyone today — may the fastest win.
+            Play 5 courses. We generate a link.<br/>
+            Send it to anyone. They play the same 5.<br/>
+            Your score stays hidden until they finish.
           </div>
         </div>
 
-        {/* Today's course preview — logos only, no names */}
+        {/* Course preview */}
         <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-          {courses.map((c, i) => (
+          {courses.map((c) => (
             <div key={c.id} style={{width:44,height:44,borderRadius:"50%",
               border:"1.5px solid rgba(200,168,75,.3)",overflow:"hidden",
               background:"white",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1813,15 +2417,15 @@ function FriendBattleHub({ profile, logos, onBack }) {
           ))}
         </div>
         <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
-          TODAY'S 7 COURSES — identify them all
+          {challengeLabel(seed)} — 5 COURSES
         </div>
 
         <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:18,padding:"18px"}}
           onClick={() => setPhase("playing")}>
-          ⚡ START SPRINT
+          ⚡ PLAY YOUR ROUND
         </button>
         <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.3)",letterSpacing:".06em"}}>
-          One attempt per day. Resets at midnight ET.
+          Your score is locked in. Then send the link.
         </div>
       </div>
     </div>
@@ -2744,6 +3348,26 @@ function AdminScreen({ logos={}, onSaveLogo, onRemoveLogo, onBack }) {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const TIER_A_IDS = [
   // The untouchables (5)
@@ -2811,6 +3435,26 @@ const TIER_A_IDS = [
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_SEQUENCE = [
   "augusta", "merion", "pacific-dunes", "oakmont", "national-golf",
@@ -2872,6 +3516,26 @@ const DAILY_SEQUENCE = [
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_OVERRIDES = {
   // populated as tournament schedule is confirmed
@@ -2925,6 +3589,26 @@ const DAILY_OVERRIDES = {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_EPOCH = "2026-05-19";  // Day 1 = launch day for testing
 /* ═══════════════════════════════════════════════════════
@@ -2969,6 +3653,26 @@ const DAILY_EPOCH = "2026-05-19";  // Day 1 = launch day for testing
    );
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
 
    ═══════════════════════════════════════════════════════ */
 
@@ -3060,6 +3764,26 @@ function getCourseOfDay(dateStr) {
    );
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
 
    ═══════════════════════════════════════════════════════ */
 
@@ -3178,6 +3902,26 @@ function getDailyOptions(correctCourse, dateStr) {
    );
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
 
    ═══════════════════════════════════════════════════════ */
 
@@ -3324,6 +4068,26 @@ function monthStreak(dailyHistory, monthStr) {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 function generateDailyShare(dayStr, timeMs, correct, streakInfo) {
   const sec = (timeMs / 1000).toFixed(1);
@@ -3384,6 +4148,26 @@ function generateDailyShare(dayStr, timeMs, correct, streakInfo) {
    );
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
 
    ═══════════════════════════════════════════════════════ */
 
@@ -3645,6 +4429,26 @@ const dailyDb = {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 const authDb = {
@@ -3899,6 +4703,112 @@ const battleDb = {
   }
 };
 
+
+/* ═══════════════════════════════════════════════════════
+   HEAD-TO-HEAD CHALLENGE — link-based 1v1
+   ───────────────────────────────────────────────────────
+   Flow:
+     1. Challenger plays 5 seeded courses → result saved
+     2. App generates share link: golf-iq.app?c=CHALLENGEID
+     3. Challenger texts link to opponent
+     4. Opponent taps link → plays same 5 courses
+     5. After opponent finishes → both see full result
+   Table: challenges
+     id, seed, challenger_username, challenger_time_ms,
+     challenger_correct, opponent_username, opponent_time_ms,
+     opponent_correct, course_ids, created_at
+═══════════════════════════════════════════════════════ */
+
+// Generate a date + short hash label: "June 14 · #4F2"
+function challengeLabel(seed) {
+  const short = seed.toUpperCase().slice(0, 3);
+  const today = getETDateString();
+  const date = new Date(today + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  return date + " · #" + short;
+}
+
+// Personalized label: "@Jeff v @Josh · June 14 · #4F2"
+function challengeLabelPersonal(seed, userA, userB) {
+  const short = seed.toUpperCase().slice(0, 3);
+  const today = getETDateString();
+  const date = new Date(today + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const players = userA && userB ? "@" + userA + " v @" + userB + " · " : userA ? "@" + userA + " · " : "";
+  return players + date + " · #" + short;
+}
+
+// Short hash only (3 chars) for compact display
+function challengeShort(seed) {
+  return seed.toUpperCase().slice(0, 3);
+}
+
+// Get 5 courses for a challenge from a seed string
+function getChallengeCourses(seed) {
+  const shuffled = seededShuffle(ALL_COURSES.filter(c => c.logoUrl || true), "challenge-" + seed);
+  return shuffled.slice(0, 5);
+}
+
+// Generate a random 8-char seed
+function newChallengeSeed() {
+  return Math.random().toString(36).substring(2, 10);
+}
+
+const challengeDb = {
+  // Save challenger's attempt and get back the challenge id
+  createChallenge: async function({ seed, username, correctCount, timeMs, courseIds }) {
+    try {
+      const r = await fetch(SB_URL + "/rest/v1/challenges", {
+        method: "POST",
+        headers: Object.assign({}, SB_HEADERS, { "Prefer": "return=representation" }),
+        body: JSON.stringify({
+          seed,
+          challenger_username: normalizeUsername(username),
+          challenger_display: username,
+          challenger_correct: correctCount,
+          challenger_time_ms: timeMs,
+          course_ids: courseIds.join(",")
+        })
+      });
+      if (!r.ok) { const t = await r.text(); console.error("createChallenge failed:", r.status, t); return null; }
+      const rows = await r.json();
+      return rows[0];
+    } catch(e) { console.error("createChallenge error:", e); return null; }
+  },
+
+  // Fetch a challenge by seed (for opponent loading)
+  getChallenge: async function(seed) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/challenges?seed=eq." + encodeURIComponent(seed) +
+        "&select=*&limit=1",
+        { headers: SB_HEADERS }
+      );
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return rows.length ? rows[0] : null;
+    } catch(e) { return null; }
+  },
+
+  // Save opponent's result
+  completeChallenge: async function({ seed, username, correctCount, timeMs }) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/challenges?seed=eq." + encodeURIComponent(seed),
+        {
+          method: "PATCH",
+          headers: SB_HEADERS,
+          body: JSON.stringify({
+            opponent_username: normalizeUsername(username),
+            opponent_display: username,
+            opponent_correct: correctCount,
+            opponent_time_ms: timeMs
+          })
+        }
+      );
+      return r.ok;
+    } catch(e) { return false; }
+  }
+};
+
 /* ═══════════════════════════════════════════════════════
    SQL — Run once in Supabase SQL Editor to create tables
    ───────────────────────────────────────────────────────
@@ -4001,6 +4911,26 @@ const battleDb = {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════
    DAILY COURSE SCREEN — One puzzle, one guess
@@ -4050,6 +4980,26 @@ const battleDb = {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════
@@ -4096,7 +5046,104 @@ const battleDb = {
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
+
+
+/* ═══════════════════════════════════════════════════════
+   EMAIL SOFT NUDGE — Day 3+, slim one-line prompt
+   Lower friction than the Day-7 full card.
+   Dismisses permanently. Never shown after email saved.
+═══════════════════════════════════════════════════════ */
+function EmailSoftNudge({ profile, onSave, onDismiss, context }) {
+  const [expanded, setExpanded] = useState(false);
+  const [email, setEmail]       = useState("");
+  const [status, setStatus]     = useState("idle"); // idle | saving | done | error
+  const [msg, setMsg]           = useState("");
+
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const submit = async () => {
+    if (!valid) return;
+    setStatus("saving");
+    const res = await onSave(email.trim());
+    if (res && res.ok) { setStatus("done"); }
+    else { setStatus("error"); setMsg((res && res.message) || "Try again."); }
+  };
+
+  if (status === "done") return (
+    <div style={{padding:"10px 14px",background:"rgba(40,200,90,.08)",
+      borderRadius:8,border:"1px solid rgba(40,200,90,.2)",
+      fontSize:12,color:"rgba(150,220,150,.8)",textAlign:"center"}}>
+      ✓ Email saved — your streak is protected across devices.
+    </div>
+  );
+
+  const nudgeText = context === "leaderboard"
+    ? "Protect your spot on the board across devices →"
+    : "Playing on multiple devices? Protect your streak →";
+
+  if (!expanded) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+      padding:"9px 14px",background:"rgba(200,168,75,.06)",
+      borderRadius:8,border:"1px solid rgba(200,168,75,.15)",cursor:"pointer"}}
+      onClick={() => setExpanded(true)}>
+      <div style={{fontSize:12,color:"rgba(200,168,75,.65)"}}>{nudgeText}</div>
+      <div style={{fontSize:11,color:"rgba(200,168,75,.4)",flexShrink:0,marginLeft:8}}>
+        tap →
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{padding:"14px",background:"rgba(200,168,75,.07)",
+      borderRadius:8,border:"1px solid rgba(200,168,75,.2)"}}>
+      <div style={{fontSize:12,color:"rgba(200,168,75,.7)",marginBottom:10,lineHeight:1.4}}>
+        Save your email to sync your streak across devices. No password, no spam.
+      </div>
+      <input
+        type="email" inputMode="email" placeholder="you@email.com"
+        value={email} onChange={e => setEmail(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") submit(); }}
+        style={{width:"100%",padding:"10px 12px",borderRadius:6,
+          background:"rgba(0,0,0,.25)",border:"1px solid rgba(200,168,75,.25)",
+          color:"#f0dfa0",fontSize:14,outline:"none",boxSizing:"border-box",
+          marginBottom:8}}/>
+      {status === "error" && (
+        <div style={{fontSize:11,color:"#e08a8a",marginBottom:8}}>{msg}</div>
+      )}
+      <div style={{display:"flex",gap:8}}>
+        <button className="gi-btn gi-btn-gold" style={{flex:1,padding:"10px",fontSize:13}}
+          disabled={!valid || status === "saving"} onClick={submit}>
+          {status === "saving" ? "Saving…" : "Save →"}
+        </button>
+        <button className="gi-btn gi-btn-ghost" style={{fontSize:12,padding:"10px 12px"}}
+          onClick={() => { setExpanded(false); onDismiss && onDismiss(); }}>
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function EmailCapture({ profile, streak, onSave, onDismiss }) {
   const [email, setEmail]   = useState("");
@@ -4221,6 +5268,26 @@ function EmailCapture({ profile, streak, onSave, onDismiss }) {
    );
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
 
    ═══════════════════════════════════════════════════════ */
 function getMilestoneShare(streakInfo, dailyHistory, courseName, timeMs) {
@@ -4391,6 +5458,17 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
           )}
         </div>
 
+        {/* ── Email soft nudge — Day 3+ (below Day-7 threshold) ── */}
+        {result.correct && streak.state === "active" && streak.streak >= 3 && streak.streak < 7
+          && profile && !hadEmailAtMount && !(profile && profile.emailPromptDismissed) && !emailHidden && (
+          <EmailSoftNudge
+            profile={profile}
+            context="result"
+            onSave={onSaveEmail}
+            onDismiss={() => { setEmailHidden(true); onDismissEmail && onDismissEmail(); }}
+          />
+        )}
+
         {/* ── Email capture — Day-7 earned moment ── */}
         {result.correct && streak.state === "active" && streak.streak >= 7
           && profile && !hadEmailAtMount && !(profile && profile.emailPromptDismissed) && !emailHidden && (
@@ -4490,6 +5568,16 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
               </div>
             )}
           </div>
+
+          {/* ── Email nudge on inline board ── */}
+          {profile && !profile.email && !profile.emailPromptDismissed && streak.streak >= 1 && (
+            <EmailSoftNudge
+              profile={profile}
+              context="leaderboard"
+              onSave={onSaveEmail}
+              onDismiss={() => {}}
+            />
+          )}
 
           {lbLoading && (
             <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:24,fontSize:13}}>Loading board…</div>
@@ -4868,6 +5956,26 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
    ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 8. Head-to-Head Challenges
+   CREATE TABLE IF NOT EXISTS challenges (
+     id BIGSERIAL PRIMARY KEY,
+     seed TEXT NOT NULL UNIQUE,
+     challenger_username TEXT NOT NULL,
+     challenger_display TEXT,
+     challenger_correct INTEGER NOT NULL,
+     challenger_time_ms INTEGER NOT NULL,
+     opponent_username TEXT,
+     opponent_display TEXT,
+     opponent_correct INTEGER,
+     opponent_time_ms INTEGER,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   CREATE INDEX IF NOT EXISTS idx_ch_seed ON challenges(seed);
+   ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "ch_all" ON challenges FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 function monthlyTrophy(rank) {
@@ -4979,6 +6087,19 @@ function LeaderboardScreen({ profile, onBack, logos }) {
             opacity: isCurrent ? .25 : 1, pointerEvents: isCurrent ? "none" : "auto"}}
             onClick={()=>{ if(!isCurrent) setOffset(offset+1); }} aria-label="Next month">→</button>
         </div>
+
+        {/* ── Email nudge — protect your spot ── */}
+        {profile && !profile.email && !profile.emailPromptDismissed && (
+          <EmailSoftNudge
+            profile={profile}
+            context="leaderboard"
+            onSave={async (email) => {
+              const res = await dailyDb.saveEmail({ username: profile.username, email });
+              return res;
+            }}
+            onDismiss={() => {}}
+          />
+        )}
 
         {loading && <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:40}}>Loading…</div>}
 
@@ -5116,11 +6237,29 @@ function GolfIQ() {
   const [newTrophies, setNewTr]   = useState([]);
   const [logos, setLogos]         = useState({});
   const lastGameTs                = useRef(null);
-  const [dailyHistory, setDailyHistory] = useState([]);  
+  const [dailyHistory, setDailyHistory] = useState([]);
+  const [incomingChallenge, setIncomingChallenge] = useState(null);  
 
   // Load persisted data
   useEffect(() => {
     (async () => {
+      // ── Challenge link: check for ?c= parameter ──
+      const challengeSeed = new URLSearchParams(window.location.search).get("c");
+      if (challengeSeed) {
+        await Promise.all([S.get("gp-profile"), S.get("gp-history"), S.get("gp-trophies"), S.get("gp-daily-history")]).then(async ([p,h,tr,dh]) => {
+          if (p) setProfile(p);
+          if (h) setHistory(h);
+          if (tr) setTrophies(new Set(tr));
+          if (dh) setDailyHistory(dh);
+          const logoData = await db.loadAll();
+          if (Object.keys(logoData).length > 0) setLogos(logoData);
+        });
+        setIncomingChallenge(challengeSeed);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setScreen("challenge");
+        return;
+      }
+
       // ── Magic link callback: check URL for token before anything else ──
       const urlParams = new URLSearchParams(window.location.hash.substring(1) || window.location.search.substring(1));
       const hasMagicToken = urlParams.get("access_token") || urlParams.get("token_hash");
@@ -5305,7 +6444,8 @@ function GolfIQ() {
       {screen === "setup"    && <SetupScreen onSave={saveProfile} onRecoverAccount={()=>setScreen("magiclink")}/>}
       {screen === "magiclink" && <MagicLinkScreen onBack={()=>setScreen("setup")} onRecovered={()=>setScreen("home")}/>}
       {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} dailyStreak={computeStreak(dailyHistory)} dailyPlayedToday={dailyHistory.some(h => h.day === getETDateString())} onPlay={startGame} onBattle={()=>setScreen("battle")} onDaily={()=>setScreen("daily")} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}
-      {screen === "battle"    && <FriendBattleHub profile={profile} logos={logos} onBack={()=>setScreen("home")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
+      {screen === "battle"    && <FriendBattleHub profile={profile} logos={logos} onBack={()=>setScreen("home")}/>}
+      {screen === "challenge"  && <HeadToHeadHub profile={profile} logos={logos} incomingSeed={incomingChallenge} onBack={()=>setScreen("home")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
       {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
       {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
