@@ -1152,7 +1152,88 @@ function OptBtn({ letter, option, state, onClick, disabled }) {
 /* ═══════════════════════════════════════════════════════
    SETUP SCREEN
 ═══════════════════════════════════════════════════════ */
-function SetupScreen({ onSave }) {
+
+/* ═══════════════════════════════════════════════════════
+   MAGIC LINK SCREEN — cross-device identity recovery
+   Shown when: (a) user is on a new device with no profile,
+   or (b) user taps "Recover my account" from SetupScreen.
+═══════════════════════════════════════════════════════ */
+function MagicLinkScreen({ onBack, onRecovered }) {
+  const [email, setEmail]   = useState("");
+  const [phase, setPhase]   = useState("entry"); // entry | sending | sent | error
+  const [msg, setMsg]       = useState("");
+
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const send = async () => {
+    if (!valid) return;
+    setPhase("sending");
+    const res = await authDb.sendMagicLink(email.trim());
+    if (res.ok) {
+      setPhase("sent");
+    } else {
+      setMsg(res.message || "Something went wrong.");
+      setPhase("error");
+    }
+  };
+
+  if (phase === "sent") {
+    return (
+      <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+        <div className="gi-stars"/><div className="gi-spotlight"/>
+        <div className="gi-screen" style={{maxWidth:400,padding:"32px 24px",textAlign:"center"}}>
+          <div style={{fontSize:48,marginBottom:16}}>📬</div>
+          <div className="gi-serif gi-gold" style={{fontSize:26,fontWeight:900,marginBottom:12}}>Check your email</div>
+          <div style={{color:"rgba(200,180,140,.7)",fontSize:15,lineHeight:1.6,marginBottom:24}}>
+            We sent a magic link to<br/>
+            <span style={{color:"#f0dfa0",fontWeight:600}}>{email}</span><br/><br/>
+            Tap the link in that email and you'll land right back here with your streak intact.
+          </div>
+          <div style={{fontSize:12,color:"rgba(200,168,75,.4)",letterSpacing:".06em"}}>
+            Link expires in 1 hour. Check your spam if you don't see it.
+          </div>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{marginTop:24}}>← BACK</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/><div className="gi-spotlight"/>
+      <div className="gi-screen" style={{width:"100%",maxWidth:400,padding:"32px 24px"}}>
+        <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0",marginBottom:20}}>← BACK</button>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:42,marginBottom:10}}>🔗</div>
+          <div className="gi-serif gi-gold" style={{fontSize:28,fontWeight:900,lineHeight:1.1}}>Recover your account</div>
+          <div style={{color:"rgba(200,180,140,.6)",fontSize:14,marginTop:10,lineHeight:1.5}}>
+            Enter the email you saved on your original device. We'll send you a one-tap link to restore your streak.
+          </div>
+        </div>
+        <div className="gi-card" style={{padding:"24px 20px",display:"flex",flexDirection:"column",gap:14}}>
+          <input
+            type="email" inputMode="email" placeholder="you@email.com"
+            value={email} onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") send(); }}
+            className="gi-input" />
+          {phase === "error" && (
+            <div style={{fontSize:12,color:"#e08a8a",lineHeight:1.4}}>{msg}</div>
+          )}
+          <button className="gi-btn gi-btn-gold" style={{width:"100%",padding:"14px",fontSize:15}}
+            disabled={!valid || phase === "sending"}
+            onClick={send}>
+            {phase === "sending" ? "Sending…" : "SEND MAGIC LINK →"}
+          </button>
+        </div>
+        <div style={{textAlign:"center",marginTop:14,fontSize:11,color:"rgba(200,168,75,.3)",letterSpacing:".06em"}}>
+          No password. No account creation. Just your email.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SetupScreen({ onSave, onRecoverAccount }) {
   const [username, setUsername] = useState("");
   const [tagline, setTagline] = useState("");
 
@@ -1185,8 +1266,12 @@ function SetupScreen({ onSave }) {
             TEE IT UP →
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:14,color:"rgba(180,165,130,.3)",fontSize:11,letterSpacing:".08em"}}>
-          YOUR DATA STAYS ON YOUR DEVICE
+        <div style={{textAlign:"center",marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{color:"rgba(180,165,130,.3)",fontSize:11,letterSpacing:".08em"}}>YOUR DATA STAYS ON YOUR DEVICE</div>
+          <button className="gi-btn gi-btn-ghost" style={{fontSize:12,color:"rgba(200,168,75,.5)"}}
+            onClick={() => onRecoverAccount && onRecoverAccount()}>
+            Already have an account? Recover it →
+          </button>
         </div>
       </div>
     </div>
@@ -2460,6 +2545,105 @@ const dailyDb = {
   },
 };
 
+
+/* ═══════════════════════════════════════════════════════
+   MAGIC LINK AUTH — cross-device identity recovery
+   ───────────────────────────────────────────────────────
+   Flow:
+     1. User enters email on new device
+     2. We send a magic link via Supabase Auth
+     3. User taps link → lands on golf-iq.app with token
+     4. App detects token in URL, exchanges for session
+     5. Looks up username from users table by email
+     6. Hydrates full history from daily_plays
+     7. Sets profile + merges history → they're back
+   ═══════════════════════════════════════════════════════ */
+
+const authDb = {
+  // Send magic link to email
+  sendMagicLink: async function(email) {
+    try {
+      const r = await fetch(SB_URL + "/auth/v1/magiclink", {
+        method: "POST",
+        headers: {
+          "apikey": SB_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          options: { redirectTo: "https://golf-iq.app" }
+        })
+      });
+      if (r.ok) return { ok: true };
+      const txt = await r.text();
+      // "Email not found" just means they haven't linked — surface clean message
+      if (/not found|no user/i.test(txt)) {
+        return { ok: false, message: "No account found for that email. Make sure it matches the email you saved on your original device." };
+      }
+      return { ok: false, message: "Couldn't send link right now — please try again." };
+    } catch(e) {
+      return { ok: false, message: "Network error — please try again." };
+    }
+  },
+
+  // Exchange the token_hash from the URL for a session, then look up username
+  handleMagicLinkCallback: async function() {
+    try {
+      // Supabase appends #access_token=...&token_type=bearer or
+      // ?token_hash=...&type=magiclink depending on version.
+      const hash   = window.location.hash.substring(1);
+      const search = window.location.search.substring(1);
+      const params = new URLSearchParams(hash || search);
+
+      const accessToken  = params.get("access_token");
+      const tokenHash    = params.get("token_hash");
+      const type         = params.get("type");
+
+      if (!accessToken && !tokenHash) return null;
+
+      let userEmail = null;
+
+      if (accessToken) {
+        // Implicit flow — we have the token directly
+        // Fetch user from Supabase Auth
+        const r = await fetch(SB_URL + "/auth/v1/user", {
+          headers: { "apikey": SB_KEY, "Authorization": "Bearer " + accessToken }
+        });
+        if (!r.ok) return null;
+        const user = await r.json();
+        userEmail = user.email;
+      } else if (tokenHash && type === "magiclink") {
+        // PKCE flow — verify the token
+        const r = await fetch(SB_URL + "/auth/v1/verify", {
+          method: "POST",
+          headers: { "apikey": SB_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ token_hash: tokenHash, type: "magiclink" })
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        userEmail = data.user && data.user.email;
+      }
+
+      if (!userEmail) return null;
+
+      // Look up username from our users table
+      const ur = await fetch(
+        SB_URL + "/rest/v1/users?email=eq." + encodeURIComponent(userEmail.toLowerCase()) +
+        "&select=username,display_name",
+        { headers: SB_HEADERS }
+      );
+      if (!ur.ok) return null;
+      const users = await ur.json();
+      if (!users.length) return null;
+
+      return { email: userEmail, username: users[0].display_name || users[0].username };
+    } catch(e) {
+      console.error("Magic link callback error:", e);
+      return null;
+    }
+  }
+};
+
 /* ═══════════════════════════════════════════════════════
    SQL — Run once in Supabase SQL Editor to create tables
    ───────────────────────────────────────────────────────
@@ -3477,6 +3661,32 @@ function GolfIQ() {
   // Load persisted data
   useEffect(() => {
     (async () => {
+      // ── Magic link callback: check URL for token before anything else ──
+      const urlParams = new URLSearchParams(window.location.hash.substring(1) || window.location.search.substring(1));
+      const hasMagicToken = urlParams.get("access_token") || urlParams.get("token_hash");
+      if (hasMagicToken) {
+        setScreen("magiclink-recovering");
+        const recovered = await authDb.handleMagicLinkCallback();
+        // Clean the token from the URL so refresh doesn't re-trigger
+        window.history.replaceState({}, document.title, window.location.pathname);
+        if (recovered) {
+          // Build a profile from the recovered identity
+          const recoveredProfile = { username: recovered.username, email: recovered.email };
+          // Hydrate all history from cloud
+          const cloud = await dailyDb.getAllPlays(recovered.username);
+          const merged = mergeDailyHistory([], cloud);
+          setProfile(recoveredProfile);
+          setDailyHistory(merged);
+          await S.set("gp-profile", recoveredProfile);
+          await S.set("gp-daily-history", merged);
+          setScreen("home");
+          return;
+        } else {
+          // Token invalid or no linked account — fall through to normal load
+          setScreen("loading");
+        }
+      }
+
       const [p, h, tr, dh] = await Promise.all([S.get("gp-profile"), S.get("gp-history"), S.get("gp-trophies"), S.get("gp-daily-history")]);
       if (p) setProfile(p);
       if (h) setHistory(h);
@@ -3610,6 +3820,17 @@ function GolfIQ() {
     await Promise.all([S.set("gp-history", newHistory), S.set("gp-trophies", [...earned])]);
   };
 
+  if (screen === "magiclink-recovering") return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <style>{css}</style>
+      <div className="gi-stars"/>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:36,marginBottom:12}}>🔗</div>
+        <div style={{fontSize:14,color:"rgba(200,168,75,.5)",letterSpacing:".2em"}}>RESTORING YOUR ACCOUNT…</div>
+      </div>
+    </div>
+  );
+
   if (screen === "loading") return (
     <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
       <style>{css}</style>
@@ -3621,7 +3842,8 @@ function GolfIQ() {
   return (
     <>
       <style>{css}</style>
-      {screen === "setup"    && <SetupScreen onSave={saveProfile}/>}
+      {screen === "setup"    && <SetupScreen onSave={saveProfile} onRecoverAccount={()=>setScreen("magiclink")}/>}
+      {screen === "magiclink" && <MagicLinkScreen onBack={()=>setScreen("setup")} onRecovered={()=>setScreen("home")}/>}
       {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} dailyStreak={computeStreak(dailyHistory)} dailyPlayedToday={dailyHistory.some(h => h.day === getETDateString())} onPlay={startGame} onDaily={()=>setScreen("daily")} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
       {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
