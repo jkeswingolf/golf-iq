@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Golf Course IQ</title>
+  <title>Golf IQ — Name the World's Greatest Courses by Logo</title>
   <!-- Primary Meta Tags -->
-<meta name="title" content="Golf Course IQ — The Daily Golf Course Puzzle">
+<meta name="title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
 <meta name="description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
 
 <!-- Open Graph / Facebook / iMessage / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://golf-iq.app/">
-<meta property="og:title" content="Golf Course IQ — The Daily Golf Course Puzzle">
+<meta property="og:title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
 <meta property="og:description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
 <meta property="og:image" content="https://golf-iq.app/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -20,7 +20,7 @@
 <!-- Twitter / X -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://golf-iq.app/">
-<meta name="twitter:title" content="Golf Course IQ — The Daily Golf Course Puzzle">
+<meta name="twitter:title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
 <meta name="twitter:description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
 <meta name="twitter:image" content="https://golf-iq.app/og-image.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -2392,6 +2392,32 @@ const dailyDb = {
       return byUser;
     } catch(e) { return {}; }
   },
+
+  // Compute caller's percentile among correct players today.
+  // Returns { rank, total, percentile } or null on error.
+  getPercentile: async function(username, dayStr, timeMs) {
+    try {
+      // Count total correct plays today
+      const rTotal = await fetch(
+        SB_URL + "/rest/v1/daily_plays?day_str=eq." + dayStr +
+        "&correct=eq.true&select=username",
+        { headers: SB_HEADERS }
+      );
+      const totalRows = rTotal.ok ? await rTotal.json() : [];
+      const total = totalRows.length;
+      if (total === 0) return null;
+      // Count correct players faster than this time
+      const rFaster = await fetch(
+        SB_URL + "/rest/v1/daily_plays?day_str=eq." + dayStr +
+        "&correct=eq.true&time_ms=lt." + timeMs + "&select=username",
+        { headers: SB_HEADERS }
+      );
+      const fasterRows = rFaster.ok ? await rFaster.json() : [];
+      const rank = fasterRows.length + 1;
+      const percentile = Math.round((1 - fasterRows.length / total) * 100);
+      return { rank, total, percentile };
+    } catch(e) { return null; }
+  },
   // SILENT — log annual GOAT progression. No UI surfaces this in Year 1.
   // Reveal happens January 2 via separate microsite.
   logAnnualPlay: async function({ username, year, dayNum, correct, timeMs }) {
@@ -2573,6 +2599,315 @@ function EmailCapture({ profile, streak, onSave, onDismiss }) {
         <button className="gi-btn gi-btn-ghost" style={{padding:"12px 14px"}}
           onClick={onDismiss}>
           Not now
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   DAILY RESULT SCREEN — single scrollable post-play page
+   ───────────────────────────────────────────────────────
+   Replaces the old "done" phase inline JSX in DailyScreen.
+   Flow: result hero → percentile → course share → inline
+   leaderboard → sticky share footer.
+═══════════════════════════════════════════════════════ */
+function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onViewLeaderboard, onSaveEmail, onDismissEmail, hadEmailAtMount }) {
+  const [copied, setCopied]         = useState(false);
+  const [copiedCourse, setCopiedCourse] = useState(false);
+  const [percentile, setPercentile] = useState(null);
+  const [lbData, setLbData]         = useState(null);
+  const [lbLoading, setLbLoading]   = useState(true);
+  const [emailHidden, setEmailHidden] = useState(false);
+
+  const streak    = result.streakInfo;
+  const monthStr  = dayStr.slice(0, 7);
+  const today     = getETDateString();
+
+  // Fetch percentile + leaderboard in parallel
+  useEffect(() => {
+    (async () => {
+      const [pct, lb] = await Promise.all([
+        result.correct ? dailyDb.getPercentile(profile && profile.username, dayStr, result.timeMs) : Promise.resolve(null),
+        dailyDb.getMonthlyLeaderboard(monthStr, profile && profile.username, 10)
+      ]);
+      setPercentile(pct);
+      // Also fetch recent plays for leaderboard rows
+      const usernames = (lb.top || []).map(r => r.username);
+      const recentPlays = await dailyDb.getRecentPlaysForUsers(usernames, 8);
+      setLbData(Object.assign({}, lb, { recentPlays }));
+      setLbLoading(false);
+    })();
+  }, []);
+
+  // ── Share strings ──────────────────────────────────────────────────────────
+  const sec = (result.timeMs / 1000).toFixed(1);
+  const streakBit = streak.state === "active" && streak.streak > 1 ? ` 🔥${streak.streak} streak` : "";
+
+  // Generic daily share (spoiler-free)
+  const dailyShareText =
+    `Golf IQ — ${dayLabel(dayStr)}\n` +
+    (result.correct ? `⛳ Got it in ${sec}s${streakBit}` : `💨 Missed in ${sec}s`) + `\n\n` +
+    `https://golf-iq.app`;
+
+  // Course-specific share — surfaces the course name, perfect for group chats
+  const courseShareText =
+    `${course.name} came up on Golf IQ today ⛳\n` +
+    (result.correct ? `Got it in ${sec}s 🔥` : `Missed it 💨`) + `\n\n` +
+    `Think you know your courses by logo alone?\nhttps://golf-iq.app`;
+
+  const copy = async (text, setCb) => {
+    try { await navigator.clipboard.writeText(text); setCb(true); setTimeout(() => setCb(false), 2200); }
+    catch(e) { alert(text); }
+  };
+
+  // ── Result hero copy ──────────────────────────────────────────────────────
+  const resultMsg = result.correct
+    ? streak.streak >= 7 ? "🔥 ON FIRE"
+    : streak.streak >= 3 ? "🎯 DIALED IN"
+    : "⛳ WELL PLAYED"
+    : "💨 SAND TRAP";
+
+  // ── Inline leaderboard helpers ────────────────────────────────────────────
+  const windowEnd = today;
+  const dayCols = [];
+  const _endD = new Date(windowEnd + "T12:00:00Z");
+  for (let i = 4; i >= 0; i--) {
+    const d = new Date(_endD); d.setUTCDate(_endD.getUTCDate() - i);
+    dayCols.push(d.toISOString().slice(0, 10));
+  }
+  const firstInMonthIdx = dayCols.findIndex(ds => ds.slice(0, 7) === monthStr);
+  const hasPrevMonth = firstInMonthIdx > 0;
+  const meKey = profile ? normalizeUsername(profile.username) : null;
+  const myLbPlays = (lbData && lbData.recentPlays && meKey && lbData.recentPlays[meKey]) || [];
+  const playedToday = myLbPlays.some(p => p.day_str === today) || result !== null;
+
+  let myRank = lbData && lbData.myRank;
+  if (lbData && !myRank && profile) {
+    const idx = (lbData.top || []).findIndex(r => r.username === normalizeUsername(profile.username));
+    if (idx >= 0) myRank = idx + 1;
+  }
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",paddingBottom:80}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:480,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* ── Header ── */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
+            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,lineHeight:1}}>{dayLabel(dayStr)}</div>
+          </div>
+        </div>
+
+        {/* ── Result hero ── */}
+        <div className="gi-card" style={{padding:"24px 20px",textAlign:"center"}}>
+          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700,marginBottom:10}}>{resultMsg}</div>
+          <div className="gi-logo-ring" style={{width:130,height:130,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <CourseLogo course={course} size={130} uploadedData={logos && logos[course.id]}/>
+          </div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:700,marginTop:14,color:"#f0dfa0",lineHeight:1.1}}>
+            {course.name}
+          </div>
+          <div style={{fontSize:13,color:"rgba(200,180,140,.6)",marginTop:4}}>📍 {course.loc}</div>
+
+          {/* Time + streak stats */}
+          <div style={{display:"flex",gap:0,justifyContent:"center",marginTop:18,paddingTop:14,
+            borderTop:"1px solid rgba(200,168,75,.15)"}}>
+            <div style={{flex:1,textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#f0dfa0",fontWeight:700}}>{sec}s</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>YOUR TIME</div>
+            </div>
+            <div style={{width:1,background:"rgba(200,168,75,.2)",margin:"0 4px"}}/>
+            <div style={{flex:1,textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,
+                color: streak.state==="active" ? "#f0dfa0" : streak.state==="paused" ? "#888" : "#666",fontWeight:700}}>
+                {streak.streak > 0 ? "🔥" + streak.streak : "—"}
+              </div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>
+                {streak.state==="paused" ? "PAUSED" : "STREAK"}
+              </div>
+            </div>
+            {percentile && (
+              <>
+                <div style={{width:1,background:"rgba(200,168,75,.2)",margin:"0 4px"}}/>
+                <div style={{flex:1,textAlign:"center"}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#f0dfa0",fontWeight:700}}>
+                    {percentile.percentile}%
+                  </div>
+                  <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>TOP TODAY</div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Paused warning */}
+          {streak.state === "paused" && (
+            <div style={{marginTop:14,padding:"10px 14px",background:"rgba(100,100,100,.15)",
+              borderRadius:6,fontSize:12,color:"rgba(200,200,200,.7)",fontStyle:"italic"}}>
+              Your {streak.streak}-day streak is paused. Play tomorrow to keep it alive.
+            </div>
+          )}
+        </div>
+
+        {/* ── Email capture — Day-7 earned moment ── */}
+        {result.correct && streak.state === "active" && streak.streak >= 7
+          && profile && !hadEmailAtMount && !(profile && profile.emailPromptDismissed) && !emailHidden && (
+          <EmailCapture
+            profile={profile}
+            streak={streak}
+            onSave={onSaveEmail}
+            onDismiss={() => { setEmailHidden(true); onDismissEmail && onDismissEmail(); }}
+          />
+        )}
+
+        {/* ── Course-specific share nudge ── */}
+        <div className="gi-card" style={{padding:"16px 18px"}}>
+          <div style={{fontSize:12,color:"rgba(200,180,140,.65)",lineHeight:1.5,marginBottom:12}}>
+            <span style={{fontSize:14,fontWeight:700,color:"#f0dfa0"}}>{course.name}</span> came up today.
+            {" "}Know someone who's played there? Send it to your group chat.
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="gi-btn gi-btn-gold" style={{flex:1,padding:"12px",fontSize:14}}
+              onClick={() => copy(courseShareText, setCopiedCourse)}>
+              {copiedCourse ? "✓ COPIED!" : "📋 SHARE " + course.name.split(" ")[0].toUpperCase()}
+            </button>
+            <button className="gi-btn gi-btn-outline" style={{padding:"12px 14px",fontSize:13}}
+              onClick={() => copy(dailyShareText, setCopied)}>
+              {copied ? "✓" : "📊"}
+            </button>
+          </div>
+          <div style={{fontSize:10,color:"rgba(200,168,75,.3)",marginTop:8,textAlign:"center",letterSpacing:".04em"}}>
+            includes https://golf-iq.app for link preview
+          </div>
+        </div>
+
+        {/* ── Inline leaderboard ── */}
+        <div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <div>
+              <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700}}>Monthly Leaderboard</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>
+                {new Date(monthStr + "-15").toLocaleString("en-US",{month:"long"})} · STREAK CHAMPIONS
+              </div>
+            </div>
+            {myRank && (
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#f0dfa0",fontWeight:700}}>#{myRank}</div>
+                <div style={{fontSize:10,color:"rgba(200,168,75,.4)"}}>YOUR RANK</div>
+              </div>
+            )}
+          </div>
+
+          {lbLoading && (
+            <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:24,fontSize:13}}>Loading board…</div>
+          )}
+
+          {!lbLoading && lbData && (
+            <div className="gi-card" style={{padding:"6px 0"}}>
+              {/* Day column headers */}
+              {(lbData.top || []).length > 0 && (
+                <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6,
+                  padding:"4px 12px 10px",borderBottom:"1px solid rgba(200,168,75,.10)"}}>
+                  {dayCols.map((ds, ci) => {
+                    const c = getCourseOfDay(ds);
+                    const isToday = ds === today;
+                    const lock = isToday && !playedToday;
+                    const out = ci < firstInMonthIdx;
+                    const divider = hasPrevMonth && ci === firstInMonthIdx;
+                    const lbl = isToday ? "Today" : new Date(ds + "T12:00:00Z").toLocaleDateString("en-US",{weekday:"short"});
+                    return (
+                      <div key={ds} style={{textAlign:"center",opacity:out?0.5:1,borderLeft:divider?"1px solid rgba(240,208,96,.4)":"none"}}>
+                        <div style={{height:34,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}>
+                          {(lock || !c)
+                            ? <div style={{width:30,height:30,borderRadius:"50%",border:"1px solid rgba(200,168,75,.3)",
+                                color:"rgba(200,168,75,.55)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>?</div>
+                            : <CourseLogo course={c} size={30} uploadedData={logos && logos[c.id]}/>}
+                        </div>
+                        <div style={{fontSize:10,color:isToday?"#c8a84b":"rgba(200,180,140,.5)"}}>{lbl}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {(lbData.top || []).length === 0 && (
+                <div style={{textAlign:"center",color:"rgba(200,180,140,.4)",padding:24,fontSize:13}}>
+                  Be the first on the board this month.
+                </div>
+              )}
+
+              {(lbData.top || []).map((row, i) => {
+                const isMe = profile && row.username === normalizeUsername(profile.username);
+                const trophy = monthlyTrophy(i + 1);
+                const byDate = {};
+                ((lbData.recentPlays && lbData.recentPlays[row.username]) || []).forEach(p => { byDate[p.day_str] = p; });
+                const avgMs = row.plays_this_month ? row.total_time_ms / row.plays_this_month : 0;
+                return (
+                  <div key={row.username} style={{
+                    padding:"11px 12px 9px",
+                    borderBottom: i < (lbData.top.length - 1) ? "1px solid rgba(200,168,75,.08)" : "none",
+                    background: isMe ? "rgba(200,168,75,.08)" : "transparent"
+                  }}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{width:24,fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,
+                        color: i===0 ? "#f0d060" : i<3 ? "#c8a84b" : "rgba(200,168,75,.5)",textAlign:"center"}}>
+                        {trophy ? <span style={{fontSize:15}}>{trophy.medal}</span> : (i+1)}
+                      </div>
+                      <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+                        <span style={{fontWeight:isMe?700:600,fontSize:13,color:isMe?"#f0dfa0":"#e8d5a0"}}>
+                          @{row.display_name || row.username}
+                        </span>
+                        {isMe && <span style={{fontSize:10,opacity:.6,marginLeft:4}}>(you)</span>}
+                        {row.all_time_streak > row.current_streak && (
+                          <span style={{fontSize:10,color:"rgba(200,168,75,.5)",marginLeft:5}}>⭐{row.all_time_streak}</span>
+                        )}
+                      </div>
+                      <div style={{fontSize:14,color:"#f0dfa0",fontFamily:"'Playfair Display',serif"}}>🔥{row.current_streak}</div>
+                      <div style={{textAlign:"right",minWidth:48}}>
+                        <div style={{fontSize:11,color:"#e8d5a0"}}>avg {(avgMs/1000).toFixed(1)}s</div>
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6}}>
+                      {dayCols.map((ds, ci) => {
+                        const out = ci < firstInMonthIdx;
+                        const divider = hasPrevMonth && ci === firstInMonthIdx;
+                        const base = {textAlign:"center",borderLeft:divider?"1px solid rgba(240,208,96,.4)":"none"};
+                        const p = byDate[ds];
+                        if (!p) return <div key={ds} style={Object.assign({fontSize:13,color:"rgba(200,168,75,.18)"},base)}>·</div>;
+                        const t = (p.time_ms/1000).toFixed(1) + "s";
+                        return p.correct
+                          ? <div key={ds} style={Object.assign({fontSize:12,fontWeight:600,color:out?"rgba(232,213,160,.45)":"#e8d5a0"},base)}>{t}</div>
+                          : <div key={ds} style={Object.assign({fontSize:11,color:out?"rgba(217,138,106,.5)":"#d98a6a"},base)}>💨{t}</div>;
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button className="gi-btn gi-btn-outline" onClick={onViewLeaderboard}
+            style={{width:"100%",marginTop:10,fontSize:13,padding:"11px"}}>
+            🏆 FULL LEADERBOARD + MONTH NAV
+          </button>
+        </div>
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+          Come back tomorrow at midnight ET for a new course.
+        </div>
+      </div>
+
+      {/* Sticky share footer */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,
+        background:"linear-gradient(to top, rgba(7,13,31,1) 60%, rgba(7,13,31,0))",
+        padding:"16px 20px 20px",display:"flex",gap:10,justifyContent:"center",zIndex:10}}>
+        <button className="gi-btn gi-btn-gold" style={{flex:1,maxWidth:340,fontSize:15,padding:"14px"}}
+          onClick={() => copy(courseShareText, setCopiedCourse)}>
+          {copiedCourse ? "✓ COPIED!" : "📋 SHARE THIS"}
         </button>
       </div>
     </div>
@@ -2776,88 +3111,20 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
     );
   }
 
-  // ── DONE ──
-  const streak = result.streakInfo;
-  const msg = result.correct
-    ? streak.streak >= 7 ? "🔥 ON FIRE"
-    : streak.streak >= 3 ? "🎯 DIALED IN"
-    : "⛳ WELL PLAYED"
-    : "💨 SAND TRAP";
-
+  // ── DONE — delegate to DailyResultScreen ──
   return (
-    <div className="gi-app" style={{minHeight:"100vh"}}>
-      <div className="gi-stars"/>
-      <div className="gi-screen" style={{maxWidth:480,margin:"0 auto",padding:"24px 16px",display:"flex",flexDirection:"column",gap:18}}>
-
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>DAILY COURSE</div>
-            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,lineHeight:1}}>{dayLabel(dayStr)}</div>
-          </div>
-        </div>
-
-        {/* Result card */}
-        <div className="gi-card" style={{padding:"20px",textAlign:"center"}}>
-          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700,marginBottom:8}}>{msg}</div>
-          <CourseLogo course={course} size={120} uploadedData={logos && logos[course.id]}/>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,marginTop:14,color:"#f0dfa0"}}>
-            {course.name}
-          </div>
-          <div style={{fontSize:13,color:"rgba(200,180,140,.6)",marginTop:4}}>📍 {course.loc}</div>
-
-          <div style={{display:"flex",gap:24,justifyContent:"center",marginTop:18,paddingTop:14,
-            borderTop:"1px solid rgba(200,168,75,.15)"}}>
-            <div>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f0dfa0"}}>{fmtFull(result.timeMs)}</div>
-              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>YOUR TIME</div>
-            </div>
-            <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
-            <div>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,
-                color: streak.state==="active" ? "#f0dfa0" : streak.state==="paused" ? "#888" : "#666"}}>
-                {streak.streak > 0 ? "🔥" + streak.streak : "—"}
-              </div>
-              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em"}}>
-                {streak.state==="paused" ? "PAUSED" : "STREAK"}
-              </div>
-            </div>
-          </div>
-
-          {streak.state === "paused" && (
-            <div style={{marginTop:14,padding:"10px 14px",background:"rgba(100,100,100,.15)",
-              borderRadius:6,fontSize:12,color:"rgba(200,200,200,.7)",fontStyle:"italic"}}>
-              Your {streak.streak}-day streak is paused. Play tomorrow to keep it alive.
-            </div>
-          )}
-        </div>
-
-        {/* Day-7 email capture — earned-commitment moment only */}
-        {result.correct && streak.state === "active" && streak.streak >= 7
-          && profile && !hadEmailAtMount && !(profile && profile.emailPromptDismissed) && !emailHidden && (
-          <EmailCapture
-            profile={profile}
-            streak={streak}
-            onSave={onSaveEmail}
-            onDismiss={() => { setEmailHidden(true); onDismissEmail && onDismissEmail(); }}
-          />
-        )}
-
-        {/* Actions */}
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:16,padding:"15px"}} onClick={copy}>
-            {copied ? "✓ COPIED!" : "📋 SHARE TODAY'S RESULT"}
-          </button>
-          <button className="gi-btn gi-btn-outline" onClick={onViewLeaderboard}>
-            🏆 VIEW LEADERBOARD
-          </button>
-        </div>
-
-        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em",marginTop:6}}>
-          Come back tomorrow at midnight ET for a new course.
-        </div>
-      </div>
-    </div>
+    <DailyResultScreen
+      profile={profile}
+      course={course}
+      result={result}
+      dayStr={dayStr}
+      logos={logos}
+      onBack={onBack}
+      onSaveEmail={onSaveEmail}
+      onDismissEmail={onDismissEmail}
+      hadEmailAtMount={hadEmailAtMount}
+      onViewLeaderboard={onViewLeaderboard}
+    />
   );
 }
 
