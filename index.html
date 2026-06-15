@@ -6,13 +6,13 @@
   <title>Golf IQ — Name the World's Greatest Courses by Logo</title>
   <!-- Primary Meta Tags -->
 <meta name="title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
-<meta name="description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
+<meta name="description" content="A new course logo every day. One guess. No do-overs. Challenge yourself — and your friends — if you dare.">
 
 <!-- Open Graph / Facebook / iMessage / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://golf-iq.app/">
 <meta property="og:title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
-<meta property="og:description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
+<meta property="og:description" content="A new course logo every day. One guess. No do-overs. Challenge yourself — and your friends — if you dare.">
 <meta property="og:image" content="https://golf-iq.app/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -21,7 +21,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://golf-iq.app/">
 <meta name="twitter:title" content="Golf IQ — Can you name the world's greatest courses by logo alone?">
-<meta name="twitter:description" content="Can you ID the world's greatest golf courses by their logos alone? Daily puzzle. Streaks. Top 100.">
+<meta name="twitter:description" content="A new course logo every day. One guess. No do-overs. Challenge yourself — and your friends — if you dare.">
 <meta name="twitter:image" content="https://golf-iq.app/og-image.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
@@ -2613,16 +2613,51 @@ function EmailCapture({ profile, streak, onSave, onDismiss }) {
    Flow: result hero → percentile → course share → inline
    leaderboard → sticky share footer.
 ═══════════════════════════════════════════════════════ */
-function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onViewLeaderboard, onSaveEmail, onDismissEmail, hadEmailAtMount }) {
+
+/* ═══════════════════════════════════════════════════════
+   MILESTONE SHARE — surfaces automatically at key moments
+   ───────────────────────────────────────────────────────
+   Returns { text, label } or null if no milestone today.
+   Priority: highest streak milestone wins.
+   ═══════════════════════════════════════════════════════ */
+function getMilestoneShare(streakInfo, dailyHistory, courseName, timeMs) {
+  const streak = streakInfo.streak;
+  const totalCorrect = (dailyHistory || []).filter(h => h.correct).length;
+  const sec = (timeMs / 1000).toFixed(1);
+
+  // Streak milestones — highest wins
+  if (streak === 100) return {
+    label: "💯 100-DAY STREAK",
+    text: `100 days. 100 correct. 🔥\n\nI've been on a 100-day streak on Golf IQ — a new course logo every day, one guess, no do-overs.\n\nThink you know your courses?\nhttps://golf-iq.app`
+  };
+  if (streak === 30) return {
+    label: "🔥 30-DAY STREAK",
+    text: `30-day streak on Golf IQ. ⛳\n\n30 course logos. 30 correct in a row.\n\nCan you keep up?\nhttps://golf-iq.app`
+  };
+  if (streak === 7) return {
+    label: "🔥 7-DAY STREAK",
+    text: `One week straight on Golf IQ. 🔥\n\nA new course logo every day. One guess. No do-overs.\n\nChallenge yourself — if you dare.\nhttps://golf-iq.app`
+  };
+  // First correct ever
+  if (totalCorrect === 1) return {
+    label: "⛳ FIRST ONE DOWN",
+    text: `Just got my first one on Golf IQ ⛳\n\n${courseName} in ${sec}s.\n\nDaily course logo puzzle — one guess, no do-overs.\nhttps://golf-iq.app`
+  };
+  return null;
+}
+
+function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onViewLeaderboard, onSaveEmail, onDismissEmail, hadEmailAtMount, dailyHistory }) {
   const [copied, setCopied]         = useState(false);
   const [copiedCourse, setCopiedCourse] = useState(false);
   const [percentile, setPercentile] = useState(null);
   const [lbData, setLbData]         = useState(null);
   const [lbLoading, setLbLoading]   = useState(true);
   const [emailHidden, setEmailHidden] = useState(false);
+  const [milestoneCopied, setMilestoneCopied] = useState(false);
 
   const streak    = result.streakInfo;
   const monthStr  = dayStr.slice(0, 7);
+  const milestone = result.correct ? getMilestoneShare(streak, dailyHistory || [], course.name, result.timeMs) : null;
   const today     = getETDateString();
 
   // Fetch percentile + leaderboard in parallel
@@ -2763,6 +2798,57 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
             onDismiss={() => { setEmailHidden(true); onDismissEmail && onDismissEmail(); }}
           />
         )}
+
+
+        {/* ── Milestone share — auto-surfaces at key moments ── */}
+        {milestone && (
+          <div className="gi-card" style={{padding:"18px 20px",
+            background:"linear-gradient(135deg,rgba(200,168,75,.18),rgba(200,168,75,.06))",
+            border:"1px solid rgba(200,168,75,.5)"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.7)",fontWeight:700,marginBottom:6}}>
+              {milestone.label}
+            </div>
+            <div style={{fontSize:13,color:"rgba(200,180,140,.75)",lineHeight:1.5,marginBottom:12,fontStyle:"italic"}}>
+              "{milestone.text.split("\n")[0]}"
+            </div>
+            <button className="gi-btn gi-btn-gold" style={{width:"100%",padding:"12px",fontSize:14}}
+              onClick={() => copy(milestone.text, setMilestoneCopied)}>
+              {milestoneCopied ? "✓ COPIED!" : "📋 SHARE THIS MILESTONE"}
+            </button>
+          </div>
+        )}
+
+
+        {/* ── Month-end glory share — last day of month only ── */}
+        {(()=>{
+          const lastDay = lastDayOfMonth(monthStr);
+          const isLastDay = dayStr === lastDay;
+          const myTrophy = monthlyTrophy(myRank);
+          if (!isLastDay || !myTrophy || !myRank) return null;
+          const monthName = new Date(monthStr + "-15").toLocaleString("en-US",{month:"long",year:"numeric"});
+          const place = myRank === 1 ? "Champion 🥇" : myRank <= 3 ? `#${myRank} 🥈` : `#${myRank} 🥉`;
+          const shareText = `Golf IQ — ${monthName}\n${myTrophy.medal} I finished ${place}\n\nMonthly leaderboard, streak battle.\nThink you can beat me next month?\nhttps://golf-iq.app`;
+          return (
+            <div className="gi-card" style={{padding:"18px 20px",textAlign:"center",
+              background:"linear-gradient(135deg,rgba(200,168,75,.2),rgba(200,168,75,.07))",
+              border:"1px solid rgba(200,168,75,.55)"}}>
+              <div style={{fontSize:28,marginBottom:6}}>{myTrophy.medal}</div>
+              <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700,marginBottom:4}}>
+                Month ends tonight
+              </div>
+              <div style={{fontSize:13,color:"rgba(200,180,140,.7)",marginBottom:14,lineHeight:1.4}}>
+                You're finishing {place} for {monthName}. That's worth sharing.
+              </div>
+              <button className="gi-btn gi-btn-gold" style={{width:"100%",padding:"13px",fontSize:15}}
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(shareText); }
+                  catch(e) { alert(shareText); }
+                }}>
+                📋 SHARE YOUR FINISH
+              </button>
+            </div>
+          );
+        })()}
 
         {/* ── Course-specific share nudge ── */}
         <div className="gi-card" style={{padding:"16px 18px"}}>
@@ -2924,6 +3010,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
   const [result, setResult]       = useState(null);  // { correct, timeMs, streakInfo }
   const [copied, setCopied]       = useState(false);
   const [emailHidden, setEmailHidden] = useState(false);
+  const [milestoneCopied, setMilestoneCopied] = useState(false);
   const [mergedHistory, setMergedHistory] = useState(null);
   const hadEmailAtMount = useRef(!!(profile && profile.email)).current;
   const qStart                    = useRef(0);
@@ -3119,6 +3206,7 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
       result={result}
       dayStr={dayStr}
       logos={logos}
+      dailyHistory={mergedHistory || dailyHistory}
       onBack={onBack}
       onSaveEmail={onSaveEmail}
       onDismissEmail={onDismissEmail}
