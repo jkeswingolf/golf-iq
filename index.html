@@ -442,6 +442,47 @@ html, body { height: 100%; }
 
    ───────────────────────────────────────────────────────
    FUTURE ENTRIES: add new dated blocks above this line.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const ALL_COURSES = [
 
@@ -1158,6 +1199,635 @@ function OptBtn({ letter, option, state, onClick, disabled }) {
    Shown when: (a) user is on a new device with no profile,
    or (b) user taps "Recover my account" from SetupScreen.
 ═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   FRIEND BATTLE — Sprint game screen (7 courses, timed,
+   pressure cooker: wrong = silent penalty, reveal at end)
+═══════════════════════════════════════════════════════ */
+function SprintScreen({ profile, logos, onComplete, onBack }) {
+  const dateStr   = getETDateString();
+  const courses   = getSprintCourses(dateStr);
+  const [qIdx, setQIdx]         = useState(0);
+  const [answers, setAnswers]   = useState([]); // { correct, picked, timeMs }
+  const [phase, setPhase]       = useState("idle"); // idle | sel | done
+  const [selectedOpt, setSel]   = useState(null);
+  const [elapsed, setElapsed]   = useState(0);
+  const [totalMs, setTotalMs]   = useState(0);
+  const [penalties, setPenalties] = useState(0);
+  const qStart    = useRef(Date.now());
+  const timerRef  = useRef(null);
+
+  const q = courses[qIdx];
+
+  // Build options for current question (same deterministic logic as daily)
+  const optsData = React.useMemo(() => {
+    if (!q) return null;
+    return getDailyOptions(q, dateStr + "-sprint-" + qIdx);
+  }, [qIdx]);
+
+  useEffect(() => {
+    qStart.current = Date.now();
+    setElapsed(0);
+    timerRef.current = setInterval(() => setElapsed(Date.now() - qStart.current), 87);
+    return () => clearInterval(timerRef.current);
+  }, [qIdx]);
+
+  const choose = (optIdx) => {
+    if (phase !== "idle" || !optsData) return;
+    clearInterval(timerRef.current);
+    const t = Date.now() - qStart.current;
+    const correct = optIdx === optsData.ansIdx;
+    setSel(optIdx);
+    setPhase("sel");
+    correct ? playClick() : playWrong();
+
+    setTimeout(() => {
+      const newAnswers = [...answers, { correct, picked: optIdx, timeMs: t, course: q, optsData }];
+      const newTotal = totalMs + t;
+      const newPenalties = penalties + (correct ? 0 : SPRINT_PENALTY_MS);
+      setAnswers(newAnswers);
+      setTotalMs(newTotal);
+      setPenalties(newPenalties);
+
+      if (qIdx < courses.length - 1) {
+        setQIdx(i => i + 1);
+        setSel(null);
+        setPhase("idle");
+      } else {
+        // Sprint complete
+        const correctCount = newAnswers.filter(a => a.correct).length;
+        onComplete({
+          answers: newAnswers,
+          totalMs: newTotal,
+          penaltyMs: newPenalties,
+          adjustedMs: newTotal + newPenalties,
+          correctCount,
+          courseIds: courses.map(c => c.id),
+          dateStr
+        });
+      }
+    }, 350);
+  };
+
+  const optState = (i) => {
+    if (phase === "idle") return "idle";
+    if (phase === "sel")  return i === selectedOpt ? "sel" : "idle";
+    return "idle"; // pressure cooker — no reveal mid-round
+  };
+
+  const isOver6s = elapsed > 6000;
+  const penaltyCount = penalties / SPRINT_PENALTY_MS;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",maxWidth:520,
+        margin:"0 auto",width:"100%",padding:"18px 16px",gap:14}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>FRIEND BATTLE</div>
+            <div className="gi-serif gi-gold" style={{fontSize:16,fontWeight:700,lineHeight:1}}>
+              {qIdx + 1} of {courses.length}
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div className={`gi-timer ${isOver6s ? "gi-timer-fast" : ""}`} style={{fontSize:20}}>{fmtFull(elapsed)}</div>
+            {penaltyCount > 0 && (
+              <div style={{fontSize:10,color:"#e04040",letterSpacing:".06em"}}>+{penaltyCount * 10}s penalty</div>
+            )}
+          </div>
+        </div>
+
+        {/* Progress dots */}
+        <div style={{display:"flex",gap:6,justifyContent:"center"}}>
+          {courses.map((_, i) => (
+            <div key={i} className={`gi-dot ${
+              i < qIdx ? (answers[i] && answers[i].correct ? "gi-dot-correct" : "gi-dot-wrong")
+              : i === qIdx ? "gi-dot-active" : ""
+            }`}/>
+          ))}
+        </div>
+
+        {/* Logo */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",
+          padding:"16px 0",position:"relative",flex:1,justifyContent:"center"}}>
+          <div className="gi-spotlight" style={{width:260,height:260}}/>
+          <div className="gi-logo-ring" style={{width:156,height:156,position:"relative",zIndex:1}}>
+            <CourseLogo course={q} size={156} uploadedData={logos && logos[q.id]}/>
+          </div>
+          <div style={{marginTop:14,textAlign:"center",position:"relative",zIndex:1}}>
+            <div style={{fontSize:12,color:"rgba(200,180,140,.45)",letterSpacing:".06em"}}>
+              Wrong answers add 10s. No peeking at the answers.
+            </div>
+          </div>
+        </div>
+
+        {/* Options */}
+        {optsData && (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {optsData.opts.map((opt, i) => (
+              <OptBtn key={opt.id} letter={"ABCD"[i]} option={opt}
+                state={optState(i)} onClick={() => choose(i)} disabled={phase !== "idle"}/>
+            ))}
+          </div>
+        )}
+
+        {/* Running total */}
+        <div style={{textAlign:"center",fontSize:12,color:"rgba(200,168,75,.3)",letterSpacing:".08em"}}>
+          ⏱ RUNNING: {fmtFull(totalMs + elapsed)}
+          {penalties > 0 && <span style={{color:"rgba(220,80,80,.5)"}}> + {fmtFull(penalties)} penalty</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   SPRINT RESULT SCREEN — scorecard reveal + leaderboards
+═══════════════════════════════════════════════════════ */
+function SprintResultScreen({ profile, result, logos, onBack, onPlayAgain }) {
+  const [fieldData, setFieldData]   = useState(null);
+  const [clubs, setClubs]           = useState([]);
+  const [clubStandings, setClubStandings] = useState({});
+  const [activeClub, setActiveClub] = useState(null);
+  const [copied, setCopied]         = useState(false);
+  const [showJoin, setShowJoin]     = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [clubCode, setClubCode]     = useState("");
+  const [clubName, setClubName]     = useState("");
+  const [clubMsg, setClubMsg]       = useState("");
+
+  const dateStr = result.dateStr;
+  const adjSec  = ((result.adjustedMs) / 1000).toFixed(1);
+  const rawSec  = (result.totalMs / 1000).toFixed(1);
+  const penSec  = (result.penaltyMs / 1000).toFixed(0);
+  const perfect = result.correctCount === 7;
+
+  useEffect(() => {
+    (async () => {
+      // Fetch The Field + personal clubs in parallel
+      const [field, myClubs] = await Promise.all([
+        battleDb.getField(dateStr, 10),
+        profile ? battleDb.getMyClubs(profile.username) : []
+      ]);
+      setFieldData(field);
+      setClubs(myClubs);
+      if (myClubs.length > 0) {
+        setActiveClub(myClubs[0]);
+        const standings = await battleDb.getClubStandings(myClubs[0].id, dateStr);
+        setClubStandings(prev => Object.assign({}, prev, { [myClubs[0].id]: standings }));
+      }
+    })();
+  }, []);
+
+  const loadClubStandings = async (club) => {
+    setActiveClub(club);
+    if (!clubStandings[club.id]) {
+      const standings = await battleDb.getClubStandings(club.id, dateStr);
+      setClubStandings(prev => Object.assign({}, prev, { [club.id]: standings }));
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!clubCode.trim() || !profile) return;
+    const res = await battleDb.joinClub({ code: clubCode.trim(), username: profile.username });
+    if (res.ok) {
+      setClubs(prev => [...prev, res.club]);
+      setActiveClub(res.club);
+      setShowJoin(false); setClubCode(""); setClubMsg("");
+      const standings = await battleDb.getClubStandings(res.club.id, dateStr);
+      setClubStandings(prev => Object.assign({}, prev, { [res.club.id]: standings }));
+    } else {
+      setClubMsg(res.message || "Something went wrong.");
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!clubName.trim() || !profile) return;
+    const res = await battleDb.createClub({ name: clubName.trim(), username: profile.username });
+    if (res.ok) {
+      setClubs(prev => [...prev, res.club]);
+      setActiveClub(res.club);
+      setShowCreate(false); setClubName(""); setClubMsg("");
+      const standings = await battleDb.getClubStandings(res.club.id, dateStr);
+      setClubStandings(prev => Object.assign({}, prev, { [res.club.id]: standings }));
+    } else {
+      setClubMsg(res.message || "Something went wrong.");
+    }
+  };
+
+  const shareText =
+    `Friend Battle — Golf IQ ⚡\n` +
+    (perfect ? `7/7 correct 🎯 ` : `${result.correctCount}/7 correct `) +
+    `in ${adjSec}s` +
+    (result.penaltyMs > 0 ? ` (incl. ${penSec}s penalty)` : ``) +
+    `\n\nThink you can beat that?\nhttps://golf-iq.app`;
+
+  const myFieldRank = fieldData ? fieldData.findIndex(r =>
+    profile && r.username === normalizeUsername(profile.username)
+  ) + 1 : null;
+
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",paddingBottom:80}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{maxWidth:480,margin:"0 auto",padding:"20px 16px",
+        display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← HOME</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",fontWeight:700}}>FRIEND BATTLE</div>
+            <div className="gi-serif gi-gold" style={{fontSize:18,fontWeight:700}}>{dayLabel(dateStr)}</div>
+          </div>
+          <div style={{width:60}}/>
+        </div>
+
+        {/* Result hero */}
+        <div className="gi-card" style={{padding:"22px 20px",textAlign:"center"}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:56,fontWeight:900,lineHeight:1}}>
+            <span className="gi-gold">{result.correctCount}</span>
+            <span style={{color:"rgba(200,168,75,.3)",fontSize:32}}>/7</span>
+          </div>
+          <div style={{fontSize:14,color:"rgba(200,180,140,.65)",letterSpacing:".06em",marginTop:4}}>
+            {perfect ? "🎯 PERFECT SPRINT" : result.correctCount >= 5 ? "⚡ STRONG SPRINT" : "💨 KEEP SPRINTING"}
+          </div>
+          <div style={{display:"flex",gap:0,justifyContent:"center",marginTop:16,
+            paddingTop:14,borderTop:"1px solid rgba(200,168,75,.15)"}}>
+            <div style={{flex:1,textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#f0dfa0",fontWeight:700}}>{rawSec}s</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:2}}>RAW TIME</div>
+            </div>
+            {result.penaltyMs > 0 && <>
+              <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
+              <div style={{flex:1,textAlign:"center"}}>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#e04040",fontWeight:700}}>+{penSec}s</div>
+                <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:2}}>PENALTY</div>
+              </div>
+            </>}
+            <div style={{width:1,background:"rgba(200,168,75,.2)"}}/>
+            <div style={{flex:1,textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#f0dfa0",fontWeight:700}}>{adjSec}s</div>
+              <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:2}}>FINAL TIME</div>
+            </div>
+          </div>
+          {myFieldRank && (
+            <div style={{marginTop:12,fontSize:13,color:"rgba(200,168,75,.7)"}}>
+              {myFieldRank === 1 ? "🥇 Leading The Field" : `#${myFieldRank} in The Field`}
+            </div>
+          )}
+        </div>
+
+        {/* Scorecard reveal */}
+        <div className="gi-card" style={{padding:"14px"}}>
+          <div style={{fontSize:11,letterSpacing:".14em",color:"rgba(200,168,75,.5)",
+            fontWeight:700,marginBottom:10}}>SCORECARD</div>
+          {result.answers.map((a, i) => (
+            <div key={i} className={`gi-result-row ${a.correct ? "gi-result-correct" : "gi-result-wrong"}`}
+              style={{marginBottom: i < result.answers.length - 1 ? 7 : 0}}>
+              <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,fontSize:16,
+                background:a.correct?"rgba(40,200,90,.15)":"rgba(200,40,40,.15)",
+                border:"1.5px solid "+(a.correct?"rgba(40,200,90,.4)":"rgba(200,40,40,.4)"),
+                display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {a.course.sym}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {a.course.name}
+                </div>
+                {!a.correct && a.optsData && (
+                  <div style={{fontSize:11,color:"rgba(255,140,140,.6)",marginTop:1}}>
+                    You picked: {a.optsData.opts[a.picked] && a.optsData.opts[a.picked].name}
+                  </div>
+                )}
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:12,color:"rgba(200,168,75,.55)"}}>{fmtFull(a.timeMs)}</div>
+                <div style={{fontSize:15}}>{a.correct ? "✅" : "❌"}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* The Field — global leaderboard */}
+        <div>
+          <div style={{fontSize:14,fontWeight:700,color:"#f0dfa0",marginBottom:8,
+            letterSpacing:".04em"}}>⚡ THE FIELD — {dayLabel(dateStr)}</div>
+          <div className="gi-card" style={{padding:"6px 0"}}>
+            {!fieldData && (
+              <div style={{textAlign:"center",color:"rgba(200,168,75,.4)",padding:20,fontSize:13}}>Loading…</div>
+            )}
+            {fieldData && fieldData.length === 0 && (
+              <div style={{textAlign:"center",color:"rgba(200,180,140,.4)",padding:20,fontSize:13}}>
+                You're first in The Field today. 🎯
+              </div>
+            )}
+            {fieldData && fieldData.map((row, i) => {
+              const isMe = profile && row.username === normalizeUsername(profile.username);
+              const adj = (row.adjusted_ms / 1000).toFixed(1);
+              const pen = row.penalty_ms > 0 ? ` +${row.penalty_ms/1000}s` : "";
+              return (
+                <div key={row.username} style={{
+                  padding:"10px 14px",
+                  borderBottom: i < fieldData.length - 1 ? "1px solid rgba(200,168,75,.08)" : "none",
+                  background: isMe ? "rgba(200,168,75,.08)" : "transparent",
+                  display:"flex",alignItems:"center",gap:10
+                }}>
+                  <div style={{width:22,fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,
+                    color: i===0?"#f0d060":i<3?"#c8a84b":"rgba(200,168,75,.5)",textAlign:"center"}}>
+                    {i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <span style={{fontWeight:isMe?700:500,fontSize:13,color:isMe?"#f0dfa0":"#e8d5a0"}}>
+                      @{row.display_name || row.username}
+                    </span>
+                    {isMe && <span style={{fontSize:10,opacity:.6,marginLeft:4}}>(you)</span>}
+                    <span style={{fontSize:11,color:"rgba(200,168,75,.4)",marginLeft:6}}>
+                      {row.correct_count}/7
+                    </span>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#f0dfa0",fontFamily:"'Playfair Display',serif"}}>
+                      {adj}s
+                    </div>
+                    {row.penalty_ms > 0 && (
+                      <div style={{fontSize:10,color:"rgba(220,80,80,.6)"}}>{pen} pen.</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Your Club */}
+        <div>
+          <div style={{fontSize:14,fontWeight:700,color:"#f0dfa0",marginBottom:8,letterSpacing:".04em"}}>
+            🏌️ YOUR CLUB
+          </div>
+
+          {/* Club tabs if multiple */}
+          {clubs.length > 1 && (
+            <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+              {clubs.map(club => (
+                <button key={club.id}
+                  onClick={() => loadClubStandings(club)}
+                  style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:700,
+                    background: activeClub && activeClub.id === club.id ? "rgba(200,168,75,.25)" : "rgba(255,255,255,.06)",
+                    border:"1px solid "+(activeClub && activeClub.id === club.id ? "rgba(200,168,75,.6)" : "rgba(255,255,255,.1)"),
+                    color: activeClub && activeClub.id === club.id ? "#c8a84b" : "rgba(255,255,255,.4)"}}>
+                  {club.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {activeClub && (
+            <div className="gi-card" style={{padding:"6px 0",marginBottom:10}}>
+              <div style={{padding:"8px 14px 10px",borderBottom:"1px solid rgba(200,168,75,.08)",
+                display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#f0dfa0"}}>{activeClub.name}</div>
+                  <div style={{fontSize:11,color:"rgba(200,168,75,.4)",marginTop:2}}>
+                    Club Code: <span style={{fontWeight:700,color:"rgba(200,168,75,.7)",letterSpacing:".1em"}}>
+                      {activeClub.invite_code}
+                    </span>
+                  </div>
+                </div>
+                <button className="gi-btn gi-btn-outline" style={{fontSize:11,padding:"6px 10px"}}
+                  onClick={() => {
+                    try { navigator.clipboard.writeText(
+                      "Join my Golf IQ club — Friend Battle 🏌️\nClub Code: " + activeClub.invite_code +
+                      "\nhttps://golf-iq.app"
+                    ); } catch(e) {}
+                  }}>
+                  📋 INVITE
+                </button>
+              </div>
+              {(clubStandings[activeClub.id] || []).map((row, i) => {
+                const isMe = profile && row.username === normalizeUsername(profile.username);
+                const hasPlayed = row.adjusted_ms !== null;
+                return (
+                  <div key={row.username} style={{
+                    padding:"10px 14px",
+                    borderBottom: i < (clubStandings[activeClub.id].length - 1) ? "1px solid rgba(200,168,75,.08)" : "none",
+                    background: isMe ? "rgba(200,168,75,.08)" : "transparent",
+                    display:"flex",alignItems:"center",gap:10,opacity: hasPlayed ? 1 : 0.45
+                  }}>
+                    <div style={{width:22,textAlign:"center",fontSize:14,fontWeight:700,
+                      color: i===0&&hasPlayed?"#f0d060":"rgba(200,168,75,.5)"}}>
+                      {hasPlayed ? (i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)) : "·"}
+                    </div>
+                    <div style={{flex:1}}>
+                      <span style={{fontWeight:isMe?700:500,fontSize:13,color:isMe?"#f0dfa0":"#e8d5a0"}}>
+                        @{row.display_name || row.username}
+                      </span>
+                      {isMe && <span style={{fontSize:10,opacity:.6,marginLeft:4}}>(you)</span>}
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      {hasPlayed
+                        ? <div style={{fontSize:14,fontWeight:700,color:"#f0dfa0",fontFamily:"'Playfair Display',serif"}}>
+                            {(row.adjusted_ms/1000).toFixed(1)}s
+                          </div>
+                        : <div style={{fontSize:11,color:"rgba(200,168,75,.3)"}}>not yet</div>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Join / Create Club */}
+          {!showJoin && !showCreate && (
+            <div style={{display:"flex",gap:8}}>
+              <button className="gi-btn gi-btn-outline" style={{flex:1,fontSize:12,padding:"10px"}}
+                onClick={() => { setShowJoin(true); setShowCreate(false); setClubMsg(""); }}>
+                + JOIN A CLUB
+              </button>
+              <button className="gi-btn gi-btn-outline" style={{flex:1,fontSize:12,padding:"10px"}}
+                onClick={() => { setShowCreate(true); setShowJoin(false); setClubMsg(""); }}>
+                + START A CLUB
+              </button>
+            </div>
+          )}
+
+          {showJoin && (
+            <div className="gi-card" style={{padding:"16px"}}>
+              <div style={{fontSize:12,color:"rgba(200,168,75,.6)",marginBottom:10,fontWeight:700,letterSpacing:".08em"}}>
+                ENTER CLUB CODE
+              </div>
+              <input className="gi-input" placeholder="e.g. AUG247"
+                value={clubCode} onChange={e => setClubCode(e.target.value.toUpperCase())}
+                style={{letterSpacing:".2em",fontSize:18,textAlign:"center",marginBottom:10}}
+                maxLength={6}/>
+              {clubMsg && <div style={{fontSize:12,color:"#e08a8a",marginBottom:8}}>{clubMsg}</div>}
+              <div style={{display:"flex",gap:8}}>
+                <button className="gi-btn gi-btn-gold" style={{flex:1,padding:"11px"}} onClick={handleJoin}>JOIN</button>
+                <button className="gi-btn gi-btn-ghost" onClick={() => { setShowJoin(false); setClubMsg(""); }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {showCreate && (
+            <div className="gi-card" style={{padding:"16px"}}>
+              <div style={{fontSize:12,color:"rgba(200,168,75,.6)",marginBottom:10,fontWeight:700,letterSpacing:".08em"}}>
+                NAME YOUR CLUB
+              </div>
+              <input className="gi-input" placeholder="e.g. Saturday Boys"
+                value={clubName} onChange={e => setClubName(e.target.value)}
+                style={{marginBottom:10}} maxLength={32}/>
+              {clubMsg && <div style={{fontSize:12,color:"#e08a8a",marginBottom:8}}>{clubMsg}</div>}
+              <div style={{display:"flex",gap:8}}>
+                <button className="gi-btn gi-btn-gold" style={{flex:1,padding:"11px"}} onClick={handleCreate}>CREATE</button>
+                <button className="gi-btn gi-btn-ghost" onClick={() => { setShowCreate(false); setClubMsg(""); }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+          The Field resets at midnight ET. One Sprint per day.
+        </div>
+      </div>
+
+      {/* Sticky footer */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,
+        background:"linear-gradient(to top, rgba(7,13,31,1) 60%, rgba(7,13,31,0))",
+        padding:"16px 20px 20px",display:"flex",gap:10,zIndex:10}}>
+        <button className="gi-btn gi-btn-outline" style={{flex:1,maxWidth:160,padding:"13px",fontSize:13}}
+          onClick={onBack}>← HOME</button>
+        <button className="gi-btn gi-btn-gold" style={{flex:2,maxWidth:280,fontSize:15,padding:"14px"}}
+          onClick={async () => {
+            try { await navigator.clipboard.writeText(shareText); setCopied(true); setTimeout(()=>setCopied(false),2200); }
+            catch(e) { alert(shareText); }
+          }}>
+          {copied ? "✓ COPIED!" : "📋 SHARE YOUR TIME"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   FRIEND BATTLE HUB — entry point, shows today's status
+   and routes to Sprint or result
+═══════════════════════════════════════════════════════ */
+function FriendBattleHub({ profile, logos, onBack }) {
+  const [phase, setPhase]     = useState("loading"); // loading | ready | playing | done
+  const [todayResult, setTodayResult] = useState(null);
+  const [sprintResult, setSprintResult] = useState(null);
+  const dateStr = getETDateString();
+
+  useEffect(() => {
+    (async () => {
+      if (profile) {
+        const existing = await battleDb.hasSprintedToday(profile.username, dateStr);
+        if (existing) {
+          setTodayResult(existing);
+          setPhase("done");
+        } else {
+          setPhase("ready");
+        }
+      } else {
+        setPhase("ready");
+      }
+    })();
+  }, []);
+
+  const handleComplete = async (result) => {
+    setSprintResult(result);
+    setPhase("done");
+    if (profile) {
+      await battleDb.logSprint({
+        username: profile.username,
+        dateStr: result.dateStr,
+        totalMs: result.totalMs,
+        penaltyMs: result.penaltyMs,
+        correctCount: result.correctCount,
+        courseIds: result.courseIds
+      });
+    }
+  };
+
+  if (phase === "loading") return (
+    <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+      <div className="gi-stars"/>
+      <div style={{fontSize:14,color:"rgba(200,168,75,.4)",letterSpacing:".2em"}}>LOADING…</div>
+    </div>
+  );
+
+  if (phase === "playing") return (
+    <SprintScreen profile={profile} logos={logos}
+      onComplete={handleComplete} onBack={() => setPhase("ready")}/>
+  );
+
+  if (phase === "done") {
+    // Build a result object from stored data if coming back to a played day
+    const resultToShow = sprintResult || (todayResult ? {
+      correctCount: todayResult.correct_count,
+      totalMs: todayResult.total_ms,
+      penaltyMs: todayResult.penalty_ms,
+      adjustedMs: todayResult.adjusted_ms,
+      answers: [], // no detail available for already-played
+      courseIds: [],
+      dateStr
+    } : null);
+    if (!resultToShow) { setPhase("ready"); return null; }
+    return (
+      <SprintResultScreen profile={profile} result={resultToShow} logos={logos}
+        onBack={onBack} onPlayAgain={() => setPhase("ready")}/>
+    );
+  }
+
+  // ── READY — pre-play hub ──
+  const courses = getSprintCourses(dateStr);
+  return (
+    <div className="gi-app" style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <div className="gi-stars"/>
+      <div className="gi-screen" style={{flex:1,display:"flex",flexDirection:"column",
+        maxWidth:480,margin:"0 auto",width:"100%",padding:"24px 16px",gap:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button className="gi-btn gi-btn-ghost" onClick={onBack} style={{padding:"8px 0"}}>← BACK</button>
+        </div>
+        <div style={{textAlign:"center",padding:"20px 0"}}>
+          <div style={{fontSize:42,marginBottom:8}}>⚡</div>
+          <div className="gi-serif gi-gold" style={{fontSize:36,fontWeight:900,lineHeight:1.05}}>Friend Battle</div>
+          <div style={{color:"rgba(200,180,140,.55)",fontSize:14,marginTop:8,lineHeight:1.5}}>
+            7 logos. One shot. Wrong answers add 10 seconds.<br/>
+            Same courses for everyone today — may the fastest win.
+          </div>
+        </div>
+
+        {/* Today's course preview — logos only, no names */}
+        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+          {courses.map((c, i) => (
+            <div key={c.id} style={{width:44,height:44,borderRadius:"50%",
+              border:"1.5px solid rgba(200,168,75,.3)",overflow:"hidden",
+              background:"white",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <CourseLogo course={c} size={44} uploadedData={logos && logos[c.id]}/>
+            </div>
+          ))}
+        </div>
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.35)",letterSpacing:".06em"}}>
+          TODAY'S 7 COURSES — identify them all
+        </div>
+
+        <button className="gi-btn gi-btn-gold" style={{width:"100%",fontSize:18,padding:"18px"}}
+          onClick={() => setPhase("playing")}>
+          ⚡ START SPRINT
+        </button>
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(200,168,75,.3)",letterSpacing:".06em"}}>
+          One attempt per day. Resets at midnight ET.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MagicLinkScreen({ onBack, onRecovered }) {
   const [email, setEmail]   = useState("");
   const [phase, setPhase]   = useState("entry"); // entry | sending | sent | error
@@ -1281,7 +1951,7 @@ function SetupScreen({ onSave, onRecoverAccount }) {
 /* ═══════════════════════════════════════════════════════
    HOME SCREEN
 ═══════════════════════════════════════════════════════ */
-function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday, onPlay, onDaily, onStats, onTrophies, onEditProfile, onAdmin }) {
+function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday, onPlay, onBattle, onDaily, onStats, onTrophies, onEditProfile, onAdmin }) {
   return (
     <div className="gi-app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
       <div className="gi-stars"/><div className="gi-spotlight"/>
@@ -1329,7 +1999,7 @@ function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday
             display:"flex", alignItems:"center", justifyContent:"center", gap:14}}
           onClick={onDaily}>
           <span style={{fontSize:22}}>⛳</span>
-          <span>{dailyPlayedToday ? "VIEW TODAY'S RESULT" : "PLAY TODAY'S COURSE"}</span>
+          <span>{dailyPlayedToday ? "VIEW TODAY'S RESULT" : "DAILY CHALLENGE"}</span>
           {dailyStreak && dailyStreak.streak > 0 && (
             <span style={{fontSize:13, padding:"3px 10px", borderRadius:12,
               background: dailyStreak.state==="paused" ? "rgba(80,80,80,.5)" : "rgba(0,0,0,.25)",
@@ -1339,11 +2009,19 @@ function HomeScreen({ profile, stats, trophyCount, dailyStreak, dailyPlayedToday
           )}
         </button>
 
-        {/* 5-HOLE GAME — secondary */}
+        {/* FRIEND BATTLE — secondary CTA */}
         <button className="gi-btn gi-btn-outline"
-          style={{fontSize:14, padding:"12px 32px", marginBottom:14, width:"100%"}}
+          style={{fontSize:16, padding:"14px 32px", marginBottom:10, width:"100%",
+            borderColor:"rgba(200,168,75,.5)"}}
+          onClick={onBattle}>
+          ⚡ FRIEND BATTLE
+        </button>
+
+        {/* PRACTICE — tertiary */}
+        <button className="gi-btn gi-btn-ghost"
+          style={{fontSize:13, padding:"10px 32px", marginBottom:10, width:"100%"}}
           onClick={onPlay}>
-          ⛳ 5-HOLE QUICK GAME
+          🏌️ PRACTICE ROUND
         </button>
 
         <div style={{display:"flex",gap:10,justifyContent:"center"}}>
@@ -2025,6 +2703,47 @@ function AdminScreen({ logos={}, onSaveLogo, onRemoveLogo, onBack }) {
    To expand Tier A: add course id below + log in change
    log block at top of file. Aim for additions only after
    logo quality + analytics support inclusion.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const TIER_A_IDS = [
   // The untouchables (5)
@@ -2051,6 +2770,47 @@ const TIER_A_IDS = [
    ───────────────────────────────────────────────────────
    To regenerate sequence: shuffle TIER_A_IDS once and
    paste result here. Order persists thereafter.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_SEQUENCE = [
   "augusta", "merion", "pacific-dunes", "oakmont", "national-golf",
@@ -2071,6 +2831,47 @@ const DAILY_SEQUENCE = [
      "2026-06-18": "shinnecock",   // US Open week
      "2026-07-16": "royal-liverpool", // Open (when added)
      "2026-05-14": "quail-hollow", // PGA Championship
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_OVERRIDES = {
   // populated as tournament schedule is confirmed
@@ -2083,10 +2884,92 @@ const DAILY_OVERRIDES = {
    ───────────────────────────────────────────────────────
    IMPORTANT: do not change this once Daily Course is live.
    Changing it shifts every player's day count.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 const DAILY_EPOCH = "2026-05-19";  // Day 1 = launch day for testing
 /* ═══════════════════════════════════════════════════════
    DAILY HELPERS — Date math and course selection
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 // Returns "YYYY-MM-DD" in ET timezone (puzzle reveal is midnight ET)
@@ -2137,6 +3020,47 @@ function getCourseOfDay(dateStr) {
    Honors the initials-matching rule for letter-logo
    courses. Deterministic per day so all players see the
    same 4 options (essential for Wordle-style fairness).
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 // Courses whose logos are letters/initials — distractors must match initial
@@ -2214,6 +3138,47 @@ function getDailyOptions(correctCourse, dateStr) {
      { state: "paused",  streak: N, daysSinceLastPlay: D }
      { state: "broken",  streak: 0 }
      { state: "fresh",   streak: 0 }   // never played
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 const STREAK_PAUSE_MAX = 7;  // miss 7+ days and streak resets
@@ -2318,6 +3283,47 @@ function monthStreak(dailyHistory, monthStr) {
    course or whether the player got it right (the emoji
    does that, optionally). Format intentionally short for
    group-chat sharing.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 function generateDailyShare(dayStr, timeMs, correct, streakInfo) {
   const sec = (timeMs / 1000).toFixed(1);
@@ -2338,6 +3344,47 @@ function generateDailyShare(dayStr, timeMs, correct, streakInfo) {
    1. daily_plays      — every Daily Course attempt (GOAT data)
    2. monthly_streaks  — current month's public leaderboard
    3. annual_goat      — Year 1 silent tracking (no UI exposure)
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 const dailyDb = {
@@ -2557,6 +3604,47 @@ const dailyDb = {
      5. Looks up username from users table by email
      6. Hydrates full history from daily_plays
      7. Sets profile + merges history → they're back
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 const authDb = {
@@ -2644,6 +3732,173 @@ const authDb = {
   }
 };
 
+
+/* ═══════════════════════════════════════════════════════
+   FRIEND BATTLE — Sprint game + Clubs
+   ───────────────────────────────────────────────────────
+   Tables:
+     speed_rounds  — one row per Sprint attempt
+     clubs         — group metadata
+     club_members  — group membership
+═══════════════════════════════════════════════════════ */
+
+// Deterministic 7-course Sprint sequence for a given date
+// Uses same seededShuffle logic as Daily distractors
+function getSprintCourses(dateStr) {
+  dateStr = dateStr || getETDateString();
+  const pool = ALL_COURSES.filter(c => c.logoUrl || true); // full pool
+  const shuffled = seededShuffle(pool, "sprint-" + dateStr);
+  return shuffled.slice(0, 7);
+}
+
+const SPRINT_PENALTY_MS = 10000; // 10s per wrong answer
+
+const battleDb = {
+  // Log a completed Sprint attempt
+  logSprint: async function({ username, dateStr, totalMs, penaltyMs, correctCount, courseIds }) {
+    try {
+      const r = await fetch(SB_URL + "/rest/v1/speed_rounds", {
+        method: "POST",
+        headers: Object.assign({}, SB_HEADERS, { "Prefer": "resolution=merge-duplicates" }),
+        body: JSON.stringify({
+          username: normalizeUsername(username),
+          display_name: username,
+          date_str: dateStr,
+          total_ms: totalMs,
+          penalty_ms: penaltyMs,
+          correct_count: correctCount,
+          adjusted_ms: totalMs + penaltyMs,
+          course_ids: courseIds.join(",")
+        })
+      });
+      if (!r.ok) { const t = await r.text(); console.error("logSprint failed:", r.status, t); }
+    } catch(e) { console.error("logSprint error:", e); }
+  },
+
+  // Today's Field — global leaderboard for today's Sprint, top N
+  getField: async function(dateStr, topN) {
+    topN = topN || 10;
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/speed_rounds?date_str=eq." + dateStr +
+        "&order=adjusted_ms.asc&limit=" + topN +
+        "&select=username,display_name,total_ms,penalty_ms,adjusted_ms,correct_count",
+        { headers: SB_HEADERS }
+      );
+      return r.ok ? await r.json() : [];
+    } catch(e) { return []; }
+  },
+
+  // Personal best Sprint (all time)
+  getPersonalBest: async function(username) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/speed_rounds?username=eq." + encodeURIComponent(normalizeUsername(username)) +
+        "&order=adjusted_ms.asc&limit=1" +
+        "&select=date_str,total_ms,penalty_ms,adjusted_ms,correct_count",
+        { headers: SB_HEADERS }
+      );
+      const rows = r.ok ? await r.json() : [];
+      return rows.length ? rows[0] : null;
+    } catch(e) { return null; }
+  },
+
+  // Check if player already ran the Sprint today
+  hasSprintedToday: async function(username, dateStr) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/speed_rounds?username=eq." + encodeURIComponent(normalizeUsername(username)) +
+        "&date_str=eq." + dateStr + "&select=adjusted_ms,correct_count",
+        { headers: SB_HEADERS }
+      );
+      const rows = r.ok ? await r.json() : [];
+      return rows.length ? rows[0] : null;
+    } catch(e) { return null; }
+  },
+
+  // ── CLUBS ────────────────────────────────────────────
+  createClub: async function({ name, username }) {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    try {
+      const r = await fetch(SB_URL + "/rest/v1/clubs", {
+        method: "POST",
+        headers: Object.assign({}, SB_HEADERS, { "Prefer": "return=representation" }),
+        body: JSON.stringify({ name, invite_code: code, created_by: normalizeUsername(username) })
+      });
+      if (!r.ok) { const t = await r.text(); return { ok: false, message: t }; }
+      const rows = await r.json();
+      const club = rows[0];
+      // Auto-join creator
+      await battleDb.joinClub({ code, username });
+      return { ok: true, club };
+    } catch(e) { return { ok: false, message: e.message }; }
+  },
+
+  joinClub: async function({ code, username }) {
+    try {
+      // Find club by code
+      const cr = await fetch(
+        SB_URL + "/rest/v1/clubs?invite_code=eq." + code.toUpperCase() + "&select=id,name",
+        { headers: SB_HEADERS }
+      );
+      const clubs = cr.ok ? await cr.json() : [];
+      if (!clubs.length) return { ok: false, message: "Club code not found. Check the code and try again." };
+      const club = clubs[0];
+      // Add member
+      await fetch(SB_URL + "/rest/v1/club_members", {
+        method: "POST",
+        headers: Object.assign({}, SB_HEADERS, { "Prefer": "resolution=merge-duplicates" }),
+        body: JSON.stringify({ club_id: club.id, username: normalizeUsername(username), display_name: username })
+      });
+      return { ok: true, club };
+    } catch(e) { return { ok: false, message: e.message }; }
+  },
+
+  getMyClubs: async function(username) {
+    try {
+      const r = await fetch(
+        SB_URL + "/rest/v1/club_members?username=eq." + encodeURIComponent(normalizeUsername(username)) +
+        "&select=club_id,clubs(id,name,invite_code)",
+        { headers: SB_HEADERS }
+      );
+      if (!r.ok) return [];
+      const rows = await r.json();
+      return rows.map(r => r.clubs).filter(Boolean);
+    } catch(e) { return []; }
+  },
+
+  getClubStandings: async function(clubId, dateStr) {
+    try {
+      // Get members
+      const mr = await fetch(
+        SB_URL + "/rest/v1/club_members?club_id=eq." + clubId + "&select=username,display_name",
+        { headers: SB_HEADERS }
+      );
+      const members = mr.ok ? await mr.json() : [];
+      if (!members.length) return [];
+      const userFilter = members.map(m => '"' + m.username + '"').join(",");
+      // Get today's Sprint scores for members
+      const sr = await fetch(
+        SB_URL + "/rest/v1/speed_rounds?date_str=eq." + dateStr +
+        "&username=in.(" + encodeURIComponent(userFilter) + ")" +
+        "&order=adjusted_ms.asc&select=username,display_name,adjusted_ms,total_ms,penalty_ms,correct_count",
+        { headers: SB_HEADERS }
+      );
+      const scores = sr.ok ? await sr.json() : [];
+      // Merge members with scores (show all members, not just those who played)
+      return members.map(m => {
+        const score = scores.find(s => s.username === m.username);
+        return Object.assign({}, m, score || { adjusted_ms: null });
+      }).sort((a, b) => {
+        if (a.adjusted_ms === null && b.adjusted_ms === null) return 0;
+        if (a.adjusted_ms === null) return 1;
+        if (b.adjusted_ms === null) return -1;
+        return a.adjusted_ms - b.adjusted_ms;
+      });
+    } catch(e) { return []; }
+  }
+};
+
 /* ═══════════════════════════════════════════════════════
    SQL — Run once in Supabase SQL Editor to create tables
    ───────────────────────────────────────────────────────
@@ -2705,6 +3960,47 @@ const authDb = {
    ALTER TABLE users ENABLE ROW LEVEL SECURITY;
    CREATE POLICY "users_all" ON users FOR ALL USING (true) WITH CHECK (true);
 
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════
    DAILY COURSE SCREEN — One puzzle, one guess
@@ -2713,11 +4009,93 @@ const authDb = {
      1. Load: check if user has played today
      2. If played → show result + share + leaderboard
      3. If not → show puzzle, single guess, reveal, share
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════
    EMAIL CAPTURE — Day-7 earned-commitment moment
    Never shown at signup. Surfaces only after a 7+ streak.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 function EmailCapture({ profile, streak, onSave, onDismiss }) {
@@ -2803,6 +4181,47 @@ function EmailCapture({ profile, streak, onSave, onDismiss }) {
    ───────────────────────────────────────────────────────
    Returns { text, label } or null if no milestone today.
    Priority: highest streak milestone wins.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 function getMilestoneShare(streakInfo, dailyHistory, courseName, timeMs) {
   const streak = streakInfo.streak;
@@ -3408,6 +4827,47 @@ function DailyScreen({ profile, logos, dailyHistory, onComplete, onBack, onViewL
      🥈 SILVER = finished #2–#3
      🥉 BRONZE = finished #4–#10
    Adjust the thresholds in monthlyTrophy() to taste.
+
+   -- 5. Speed rounds (Friend Battle / Sprint)
+   CREATE TABLE IF NOT EXISTS speed_rounds (
+     id BIGSERIAL PRIMARY KEY,
+     username TEXT NOT NULL,
+     display_name TEXT,
+     date_str TEXT NOT NULL,
+     total_ms INTEGER NOT NULL,
+     penalty_ms INTEGER NOT NULL DEFAULT 0,
+     adjusted_ms INTEGER NOT NULL,
+     correct_count INTEGER NOT NULL,
+     course_ids TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(),
+     UNIQUE(username, date_str)
+   );
+   CREATE INDEX IF NOT EXISTS idx_sr_date ON speed_rounds(date_str, adjusted_ms ASC);
+   ALTER TABLE speed_rounds ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "sr_all" ON speed_rounds FOR ALL USING (true) WITH CHECK (true);
+
+   -- 6. Clubs (Friend Battle groups)
+   CREATE TABLE IF NOT EXISTS clubs (
+     id BIGSERIAL PRIMARY KEY,
+     name TEXT NOT NULL,
+     invite_code TEXT NOT NULL UNIQUE,
+     created_by TEXT NOT NULL,
+     created_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "clubs_all" ON clubs FOR ALL USING (true) WITH CHECK (true);
+
+   -- 7. Club members
+   CREATE TABLE IF NOT EXISTS club_members (
+     club_id BIGINT NOT NULL REFERENCES clubs(id),
+     username TEXT NOT NULL,
+     display_name TEXT,
+     joined_at TIMESTAMPTZ DEFAULT NOW(),
+     PRIMARY KEY (club_id, username)
+   );
+   ALTER TABLE club_members ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY "cm_all" ON club_members FOR ALL USING (true) WITH CHECK (true);
+
    ═══════════════════════════════════════════════════════ */
 
 function monthlyTrophy(rank) {
@@ -3844,7 +5304,8 @@ function GolfIQ() {
       <style>{css}</style>
       {screen === "setup"    && <SetupScreen onSave={saveProfile} onRecoverAccount={()=>setScreen("magiclink")}/>}
       {screen === "magiclink" && <MagicLinkScreen onBack={()=>setScreen("setup")} onRecovered={()=>setScreen("home")}/>}
-      {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} dailyStreak={computeStreak(dailyHistory)} dailyPlayedToday={dailyHistory.some(h => h.day === getETDateString())} onPlay={startGame} onDaily={()=>setScreen("daily")} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
+      {screen === "home"     && <HomeScreen profile={profile} stats={stats} trophyCount={trophies.size} dailyStreak={computeStreak(dailyHistory)} dailyPlayedToday={dailyHistory.some(h => h.day === getETDateString())} onPlay={startGame} onBattle={()=>setScreen("battle")} onDaily={()=>setScreen("daily")} onStats={()=>setScreen("stats")} onTrophies={()=>setScreen("trophies")} onEditProfile={()=>setScreen("setup")} onAdmin={()=>setScreen("admin")}/>}
+      {screen === "battle"    && <FriendBattleHub profile={profile} logos={logos} onBack={()=>setScreen("home")}/>}      {screen === "playing"  && <GameScreen game={currentGame} profile={profile} logos={logos} onSaveLogo={saveLogo} onComplete={onGameComplete}/>}
       {screen === "results"  && <ResultsScreen game={currentGame} results={gameResult.results} times={gameResult.times} picked={gameResult.picked} profile={profile} stats={stats} newTrophies={newTrophies} onPlayAgain={startGame} onHome={()=>setScreen("home")}/>}
       {screen === "stats"    && <StatsScreen stats={stats} history={history} onBack={()=>setScreen("home")}/>}
       {screen === "trophies" && <TrophiesScreen earned={trophies} onBack={()=>setScreen("home")}/>}
