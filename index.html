@@ -5433,7 +5433,7 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
                 {streak.streak > 0 ? "🔥" + streak.streak : "—"}
               </div>
               <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>
-                {streak.state==="paused" ? "PAUSED" : "STREAK"}
+                {streak.state==="paused" ? "PAUSED" : "BEST STREAK"}
               </div>
             </div>
             {percentile && (
@@ -5535,18 +5535,14 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
         <div className="gi-card" style={{padding:"16px 18px"}}>
           <div style={{fontSize:12,color:"rgba(200,180,140,.65)",lineHeight:1.5,marginBottom:12}}>
             <span style={{fontSize:14,fontWeight:700,color:"#f0dfa0"}}>{course.name}</span> came up today.
-            {" "}Know someone who's played there? Send it to your group chat.
+            {" "} Know someone who's played or wants to? Share a little!
           </div>
           <div style={{display:"flex",gap:8}}>
             <button className="gi-btn gi-btn-gold" style={{flex:1,padding:"12px",fontSize:14}}
               onClick={() => copy(courseShareText, setCopiedCourse)}>
               {copiedCourse ? "✓ COPIED!" : "📋 SHARE " + course.name.split(" ")[0].toUpperCase()}
             </button>
-            <button className="gi-btn gi-btn-outline" style={{padding:"12px 14px",fontSize:13}}
-              onClick={() => copy(dailyShareText, setCopied)}>
-              {copied ? "✓" : "📊"}
-            </button>
-          </div>
+            </div>
           <div style={{fontSize:10,color:"rgba(200,168,75,.3)",marginTop:8,textAlign:"center",letterSpacing:".04em"}}>
             includes https://golf-iq.app for link preview
           </div>
