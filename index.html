@@ -2922,7 +2922,7 @@ function StatsScreen({ stats, history, onBack }) {
             [stats.games, "GAMES PLAYED"],
             [`${stats.correctRate}%`, "CORRECT RATE"],
             [stats.perfect, "PERFECT ROUNDS"],
-            [stats.maxStreak, "BEST STREAK"],
+            [stats.maxStreak, "PERFECT STREAK"],
             [stats.bestTime ? fmtFull(stats.bestTime) : "—", "BEST TIME"],
             [stats.fastestAnswer ? fmtFull(stats.fastestAnswer) : "—", "FASTEST ANSWER"],
           ].map(([v,l]) => (
@@ -5325,10 +5325,11 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
   const [emailHidden, setEmailHidden] = useState(false);
   const [milestoneCopied, setMilestoneCopied] = useState(false);
 
-  const streak    = result.streakInfo;
-  const monthStr  = dayStr.slice(0, 7);
-  const milestone = result.correct ? getMilestoneShare(streak, dailyHistory || [], course.name, result.timeMs) : null;
-  const today     = getETDateString();
+  const streak       = result.streakInfo;
+  const monthStr     = dayStr.slice(0, 7);
+  const milestone    = result.correct ? getMilestoneShare(streak, dailyHistory || [], course.name, result.timeMs) : null;
+  const today        = getETDateString();
+  const allTimeBest  = computeStreak(dailyHistory || [], today).streak;
 
   // Fetch percentile + leaderboard in parallel
   useEffect(() => {
@@ -5433,9 +5434,20 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
                 {streak.streak > 0 ? "🔥" + streak.streak : "—"}
               </div>
               <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>
-                {streak.state==="paused" ? "PAUSED" : "BEST STREAK"}
+                {streak.state==="paused" ? "PAUSED" : "STREAK"}
               </div>
             </div>
+            {allTimeBest > streak.streak && (
+              <>
+                <div style={{width:1,background:"rgba(200,168,75,.2)",margin:"0 4px"}}/>
+                <div style={{flex:1,textAlign:"center"}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#c8a84b",fontWeight:700}}>
+                    ⭐{allTimeBest}
+                  </div>
+                  <div style={{fontSize:10,color:"rgba(200,168,75,.4)",letterSpacing:".1em",marginTop:3}}>ALL-TIME BEST</div>
+                </div>
+              </>
+            )}
             {percentile && (
               <>
                 <div style={{width:1,background:"rgba(200,168,75,.2)",margin:"0 4px"}}/>
@@ -5613,7 +5625,7 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
                 </div>
               )}
 
-              {(lbData.top || []).map((row, i) => {
+              {(lbData.top || []).slice(0, 3).map((row, i) => {
                 const isMe = profile && row.username === normalizeUsername(profile.username);
                 const trophy = monthlyTrophy(i + 1);
                 const byDate = {};
@@ -5622,7 +5634,7 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
                 return (
                   <div key={row.username} style={{
                     padding:"11px 12px 9px",
-                    borderBottom: i < (lbData.top.length - 1) ? "1px solid rgba(200,168,75,.08)" : "none",
+                    borderBottom: i < 2 ? "1px solid rgba(200,168,75,.08)" : "none",
                     background: isMe ? "rgba(200,168,75,.08)" : "transparent"
                   }}>
                     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
@@ -5644,19 +5656,6 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
                         <div style={{fontSize:11,color:"#e8d5a0"}}>avg {(avgMs/1000).toFixed(1)}s</div>
                       </div>
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat("+dayCols.length+",1fr)",gap:6}}>
-                      {dayCols.map((ds, ci) => {
-                        const out = ci < firstInMonthIdx;
-                        const divider = hasPrevMonth && ci === firstInMonthIdx;
-                        const base = {textAlign:"center",borderLeft:divider?"1px solid rgba(240,208,96,.4)":"none"};
-                        const p = byDate[ds];
-                        if (!p) return <div key={ds} style={Object.assign({fontSize:13,color:"rgba(200,168,75,.18)"},base)}>·</div>;
-                        const t = (p.time_ms/1000).toFixed(1) + "s";
-                        return p.correct
-                          ? <div key={ds} style={Object.assign({fontSize:12,fontWeight:600,color:out?"rgba(232,213,160,.45)":"#e8d5a0"},base)}>{t}</div>
-                          : <div key={ds} style={Object.assign({fontSize:11,color:out?"rgba(217,138,106,.5)":"#d98a6a"},base)}>💨{t}</div>;
-                      })}
-                    </div>
                   </div>
                 );
               })}
@@ -5665,7 +5664,7 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
 
           <button className="gi-btn gi-btn-outline" onClick={onViewLeaderboard}
             style={{width:"100%",marginTop:10,fontSize:13,padding:"11px"}}>
-            🏆 FULL LEADERBOARD + MONTH NAV
+            🏆 VIEW FULL LEADERBOARD
           </button>
         </div>
 
