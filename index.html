@@ -380,7 +380,6 @@ html, body { height: 100%; }
 
 /* ── NEW TROPHY TOAST ── */
 @keyframes giToast { 0%{transform:translateY(-20px);opacity:0} 15%,85%{transform:none;opacity:1} 100%{transform:translateY(-20px);opacity:0} }
-@keyframes giPulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(200,168,75,.4)} 50%{opacity:.85;box-shadow:0 0 0 5px rgba(200,168,75,0)} }
 .gi-toast {
   position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
   background: linear-gradient(135deg, rgba(200,168,75,.95), rgba(120,90,20,.95));
@@ -5325,7 +5324,6 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
   const [lbLoading, setLbLoading]   = useState(true);
   const [emailHidden, setEmailHidden] = useState(false);
   const [milestoneCopied, setMilestoneCopied] = useState(false);
-  const [wrapCopied, setWrapCopied]           = useState(false);
 
   const streak       = result.streakInfo;
   const monthStr     = dayStr.slice(0, 7);
@@ -5517,81 +5515,71 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
         {/* ── Month-end countdown — final 7 days ── */}
         {(()=>{
           const lastDay   = lastDayOfMonth(monthStr);
-          const lastDate  = new Date(lastDay + "T12:00:00Z");
-          const todayDate = new Date(dayStr  + "T12:00:00Z");
-          const daysLeft  = Math.round((lastDate - todayDate) / 86400000); // 0 = last day
-          if (daysLeft > 6) return null;                                    // only final week
+          const lastDate  = new Date(lastDay  + "T12:00:00Z");
+          const todayDate = new Date(dayStr   + "T12:00:00Z");
+          const daysLeft  = Math.round((lastDate - todayDate) / 86400000);
+          if (daysLeft > 6) return null;
 
           const myTrophy  = monthlyTrophy(myRank);
           const monthName = new Date(monthStr + "-15").toLocaleString("en-US",{month:"long",year:"numeric"});
           const isLastDay = daysLeft === 0;
-
-          // ── copy varies by whether they're on the board ──────────────────
           const onBoard   = myTrophy && myRank;
           const place     = !myRank ? null
-                          : myRank === 1 ? "Champion 🥇"
-                          : myRank <= 3  ? `#${myRank} 🥈`
-                          : `#${myRank} 🥉`;
+                          : myRank === 1 ? "Champion"
+                          : myRank <= 3  ? "#" + myRank
+                          : "#" + myRank;
+          const medal     = myTrophy ? myTrophy.medal : "";
 
-          // Urgency copy that escalates day by day
-          const urgency = isLastDay ? "Last chance — board locks tonight at midnight ET."
-                        : daysLeft === 1 ? "One day left. Make it count."
-                        : daysLeft <= 3  ? `${daysLeft} days left in ${monthName.split(" ")[0]}.`
-                        :                  `Final week of ${monthName.split(" ")[0]}.`;
+          const daysLeftStr = daysLeft === 0
+            ? "the board locking tonight"
+            : (daysLeft + " day" + (daysLeft === 1 ? "" : "s") + " left");
+          const closesStr = isLastDay ? "tonight" : ("in " + daysLeft + " days");
 
-          // Headline varies: ranked vs. not yet on board
-          const headline = isLastDay && onBoard ? `You're finishing ${place}` + (myRank === 1 ? " 👑" : "")
+          const shareLines = onBoard
+            ? ("Golf IQ — " + monthName + "\n" + medal + " I'm finishing " + place + " with " + daysLeftStr + ".\n\nDaily golf course logo game — think you can beat me?\nhttps://golf-iq.app")
+            : ("Golf IQ — " + monthName + " leaderboard closes " + closesStr + ".\n\nDaily golf course logo game. Who do you know that would crush this?\nhttps://golf-iq.app");
+
+          const urgency = isLastDay
+            ? "Last chance — board locks tonight at midnight ET."
+            : daysLeft === 1 ? "One day left. Make it count."
+            : daysLeft <= 3  ? (daysLeft + " days left in " + monthName.split(" ")[0] + ".")
+            :                  ("Final week of " + monthName.split(" ")[0] + ".");
+
+          const headline = isLastDay && onBoard ? "You're finishing " + place + (myRank === 1 ? " 👑" : "")
                          : isLastDay            ? "Month ends tonight"
-                         : onBoard              ? `You're #${myRank} with ${daysLeft} day${daysLeft===1?"":"s"} to go`
-                         :                        "Jump on the board before July";
+                         : onBoard              ? "You're " + place + " with " + daysLeft + " day" + (daysLeft===1?"":"s") + " to go"
+                         :                       "Jump on the board before " + monthName.split(" ")[0];
 
-          // Sub-copy
           const sub = isLastDay && onBoard
-            ? `${monthName} is in the books. That finish is worth bragging about.`
+            ? (monthName + " is in the books. That finish is worth bragging about.")
             : isLastDay
-            ? `Play today and lock in your ${monthName} finish before midnight.`
+            ? "Play today and lock in your finish before midnight."
             : onBoard
-            ? `Hold your rank through month-end and claim your ${myTrophy.tier} trophy.`
-            : `A streak started now still earns a trophy. The board resets July 1.`;
+            ? ("Hold your rank through month-end and claim your " + myTrophy.tier + " trophy.")
+            : "A streak started now still earns a trophy. The board resets on the 1st.";
 
-          // Share string
-          const daysLeftStr = daysLeft === 0 ? "the board locking tonight" : (daysLeft + " day" + (daysLeft === 1 ? "" : "s") + " left");
-          const closesStr   = isLastDay ? "tonight" : ("in " + daysLeft + " days");
-          const shareLines  = onBoard
-            ? "Golf IQ — " + monthName + "\n" + myTrophy.medal + " I'm finishing " + place + " with " + daysLeftStr + ".\n\nDaily golf course logo game — think you can beat me?\nhttps://golf-iq.app"
-            : "Golf IQ — " + monthName + " leaderboard closes " + closesStr + ".\n\nDaily golf course logo game. Who do you know that would crush this?\nhttps://golf-iq.app";
-
-          // Colour ramps up as last day approaches
-          const borderOpacity = isLastDay ? ".75" : daysLeft <= 2 ? ".6" : ".45";
-          const bgOpacity1    = isLastDay ? ".28" : daysLeft <= 2 ? ".22" : ".15";
-          const bgOpacity2    = isLastDay ? ".10" : ".06";
+          const borderOp = isLastDay ? ".75" : daysLeft <= 2 ? ".6" : ".45";
+          const bg1      = isLastDay ? ".28" : daysLeft <= 2 ? ".22" : ".15";
+          const bg2      = isLastDay ? ".10" : ".06";
 
           return (
             <div className="gi-card" style={{padding:"18px 20px",textAlign:"center",
-              background:`linear-gradient(135deg,rgba(200,168,75,${bgOpacity1}),rgba(200,168,75,${bgOpacity2}))`,
-              border:`1px solid rgba(200,168,75,${borderOpacity})`}}>
-
-              {/* Trophy / countdown pip */}
+              background:"linear-gradient(135deg,rgba(200,168,75," + bg1 + "),rgba(200,168,75," + bg2 + "))",
+              border:"1px solid rgba(200,168,75," + borderOp + ")"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:8}}>
                 {onBoard
-                  ? <span style={{fontSize:28}}>{myTrophy.medal}</span>
+                  ? <span style={{fontSize:28}}>{medal}</span>
                   : <span style={{fontSize:26}}>🏆</span>}
-                {!isLastDay && (
-                  <div style={{background:"rgba(200,168,75,.18)",border:"1px solid rgba(200,168,75,.4)",
-                    borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,
-                    color:"#c8a84b",letterSpacing:".1em"}}>
-                    {daysLeft} DAY{daysLeft===1?"":"S"} LEFT
-                  </div>
-                )}
-                {isLastDay && (
-                  <div style={{background:"rgba(200,168,75,.25)",border:"1px solid rgba(200,168,75,.7)",
-                    borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,
-                    color:"#f0d060",letterSpacing:".1em",animation:"giPulse 1.8s ease-in-out infinite"}}>
-                    ENDS TONIGHT
-                  </div>
-                )}
+                {isLastDay
+                  ? <div style={{background:"rgba(200,168,75,.25)",border:"1px solid rgba(200,168,75,.7)",
+                      borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,color:"#f0d060",letterSpacing:".1em"}}>
+                      ENDS TONIGHT
+                    </div>
+                  : <div style={{background:"rgba(200,168,75,.18)",border:"1px solid rgba(200,168,75,.4)",
+                      borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,color:"#c8a84b",letterSpacing:".1em"}}>
+                      {daysLeft} DAY{daysLeft===1?"":"S"} LEFT
+                    </div>}
               </div>
-
               <div className="gi-serif gi-gold" style={{fontSize:17,fontWeight:700,marginBottom:5,lineHeight:1.25}}>
                 {headline}
               </div>
@@ -5601,13 +5589,12 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
               <div style={{fontSize:12,color:"rgba(200,180,140,.6)",marginBottom:14,lineHeight:1.45}}>
                 {sub}
               </div>
-
               <button className="gi-btn gi-btn-gold" style={{width:"100%",padding:"13px",fontSize:14}}
                 onClick={async () => {
-                  try { await navigator.clipboard.writeText(shareLines); setWrapCopied(true); setTimeout(()=>setWrapCopied(false),2200); }
+                  try { await navigator.clipboard.writeText(shareLines); }
                   catch(e) { alert(shareLines); }
                 }}>
-                {wrapCopied ? "✓ COPIED!" : isLastDay ? "📋 SHARE YOUR FINISH" : "📋 CHALLENGE SOMEONE FOR JULY"}
+                {isLastDay ? "📋 SHARE YOUR FINISH" : "📋 CHALLENGE SOMEONE FOR JULY"}
               </button>
             </div>
           );
