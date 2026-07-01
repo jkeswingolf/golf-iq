@@ -5555,9 +5555,9 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
             : `A streak started now still earns a trophy. The board resets July 1.`;
 
           // Share string
-          const daysLeftStr = daysLeft === 0 ? "the board locking tonight" : (daysLeft + " day" + (daysLeft===1?"":"s") + " left");
-          const closesStr = isLastDay ? "tonight" : ("in " + daysLeft + " days");
-          const shareLines = onBoard
+          const daysLeftStr = daysLeft === 0 ? "the board locking tonight" : (daysLeft + " day" + (daysLeft === 1 ? "" : "s") + " left");
+          const closesStr   = isLastDay ? "tonight" : ("in " + daysLeft + " days");
+          const shareLines  = onBoard
             ? "Golf IQ — " + monthName + "\n" + myTrophy.medal + " I'm finishing " + place + " with " + daysLeftStr + ".\n\nDaily golf course logo game — think you can beat me?\nhttps://golf-iq.app"
             : "Golf IQ — " + monthName + " leaderboard closes " + closesStr + ".\n\nDaily golf course logo game. Who do you know that would crush this?\nhttps://golf-iq.app";
 
