@@ -5325,6 +5325,7 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
   const [lbLoading, setLbLoading]   = useState(true);
   const [emailHidden, setEmailHidden] = useState(false);
   const [milestoneCopied, setMilestoneCopied] = useState(false);
+  const [wrapCopied, setWrapCopied]           = useState(false);
 
   const streak       = result.streakInfo;
   const monthStr     = dayStr.slice(0, 7);
@@ -5557,8 +5558,6 @@ function DailyResultScreen({ profile, course, result, dayStr, logos, onBack, onV
           const shareLines = onBoard
             ? `Golf IQ — ${monthName}\n${myTrophy.medal} I'm finishing ${place} with ${daysLeft === 0 ? "the board locking tonight" : `${daysLeft} day${daysLeft===1?"":"s"} left"}.\n\nDaily golf course logo game — think you can beat me?\nhttps://golf-iq.app`
             : `Golf IQ — ${monthName} leaderboard closes ${isLastDay ? "tonight" : `in ${daysLeft} days`}.\n\nDaily golf course logo game. Who do you know that would crush this?\nhttps://golf-iq.app`;
-
-          const [wrapCopied, setWrapCopied] = React.useState(false);
 
           // Colour ramps up as last day approaches
           const borderOpacity = isLastDay ? ".75" : daysLeft <= 2 ? ".6" : ".45";
